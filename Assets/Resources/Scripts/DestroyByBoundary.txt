@@ -1,0 +1,9 @@
+DestroyByBoundary = {
+    function OnTriggerExit(other) {
+        /* 原来代码是这样的 但是有个BUG 所有的怪物和石头的碰撞没有在最上层
+        GameObject.Destroy(other.gameObject)
+        */
+        var parent = other.transform.parent
+        GameObject.Destroy(parent != null ? parent.gameObject : other.gameObject)
+    }
+}

@@ -1,0 +1,38 @@
+Player = {
+    Objects = {
+        shotSpawn = {Path = "Shot Spawn", Component = Transform},
+    }
+    speed = 10,
+    tilt = 5,
+    xMin = -6,
+    xMax = 6,
+    zMin = -4,
+    zMax = 8,
+    fireRate = 0.25,
+    nextFire = 0,
+    function Awake() {
+        this.shot = objs.Shot
+    }
+    function Update() {
+		if (Input.GetButton("Fire1") && Time.time > this.nextFire)  {
+			this.nextFire = Time.time + this.fireRate;
+			var obj = GameObject.Instantiate(this.shot, this.shotSpawn.position, this.shotSpawn.rotation);
+            AddComponent(obj, clone(Mover)).speed = 20
+            PlaySound(this.gameObject)
+		}
+    }
+    function FixedUpdate() {
+        var moveHorizontal = Input.GetAxis ("Horizontal");
+		var moveVertical = Input.GetAxis ("Vertical");
+		var movement = Vector3 (moveHorizontal, 0, moveVertical);
+        var rigidbody = Util.GetComponent(this.gameObject, Rigidbody)
+		rigidbody.velocity = movement * this.speed;
+		rigidbody.position = Vector3
+		(
+			Mathf.Clamp (rigidbody.position.x, this.xMin, this.xMax), 
+			0, 
+			Mathf.Clamp (rigidbody.position.z, this.zMin, this.zMax)
+		);
+		rigidbody.rotation = Quaternion.Euler (0, 0, rigidbody.velocity.x * -this.tilt);
+    }
+}

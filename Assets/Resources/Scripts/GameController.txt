@@ -1,0 +1,72 @@
+GameController = {
+    spawnValues = Vector3(6, 0, 16),
+    spawnWait = 0.75,
+	startWait = 1,
+	waveWait = 4,
+    gameOver,
+    restart,
+    score,
+    scoreText,
+    restartText,
+    gameOverText,
+    function Awake() {
+        this.scoreText = Util.GetComponent(objs.scoreText, GUIText)
+        this.restartText = Util.GetComponent(objs.restartText, GUIText)
+        this.gameOverText = Util.GetComponent(objs.gameOverText, GUIText)
+        this.gameOver = false
+        this.restart = false
+        this.score = 0
+        this.restartText.text = ""
+        this.gameOverText.text = ""
+        this.UpdateScore()
+        YieldUtil.Start(WaitForSeconds(this.startWait), this.SpawnWaves)
+    }
+    function Update() {
+        if (this.restart) {
+            if (Input.GetKeyDown (KeyCode.R)) {
+				Application.LoadLevel (Application.loadedLevel);
+			}
+        }
+    }
+    function SpawnWaves() {
+        if (this.gameOver) return;
+        YieldUtil.Start(WaitForSeconds(this.spawnWait), this.SpawnWaves)
+        var index = math.floor(Random.Range (0, 4))
+        var hazard = null
+        if (index < 3) {
+            hazard = objs["Asteroid0" + (index + 1)]
+        } else {
+            hazard = objs.Enemy01
+        }
+        var spawnPosition = Vector3 (Random.Range (-this.spawnValues.x, this.spawnValues.x), this.spawnValues.y, this.spawnValues.z);
+        var spawnRotation = Quaternion.identity;
+        var obj = GameObject.Instantiate (hazard, spawnPosition, spawnRotation);
+        if (index < 3) {
+            AddComponent(obj, clone(Mover)).speed = -5
+            AddComponent(obj, clone(RandomRotator)).tumble = 5
+            AddComponent(obj, clone(Asteroid))
+        } else {
+            AddComponent(obj, clone(Mover), "Mover").speed = -5
+            AddComponent(obj, clone(Asteroid), "Asteroid")
+            AddComponent(obj, clone(EvasiveManeuver), "EvasiveManeuver")
+            AddComponent(obj, clone(EnemyCom))
+        }
+    }
+    function AddScore (newScoreValue)
+	{
+		this.score += newScoreValue
+		this.UpdateScore ()
+	}
+    function UpdateScore ()
+	{
+		this.scoreText.text = "Score: " + this.score
+	}
+	function GameOver ()
+	{
+		this.gameOverText.text = "Game Over!";
+        this.restartText.text = "Press 'R' for Restart"
+        this.restart = true
+		this.gameOver = true;
+	}
+
+}

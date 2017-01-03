@@ -1,0 +1,29 @@
+Mover = {
+    speed = 0,
+    function Start() {
+        Util.GetComponent(this.gameObject, Rigidbody).velocity = this.transform.forward * this.speed;
+    }
+}
+RandomRotator = {
+    tumble = 0,
+    function Start() {
+        Util.GetComponent(this.gameObject, Rigidbody).angularVelocity = Random.insideUnitSphere * this.tumble;
+    }
+}
+Asteroid = {
+    scoreValue = 10,
+    function OnTriggerEnter(other) {
+        if (other.tag == "Boundary" || other.tag == "Enemy")
+        {
+            return;
+        }
+        DestroyTime(GameObject.Instantiate(objs.explosion_asteroid, this.transform.position, this.transform.rotation));
+        if (other.tag == "Player") {
+            DestroyTime(GameObject.Instantiate(objs.explosion_player, this.transform.position, this.transform.rotation));
+            GameController.GameOver()
+        }
+        GameController.AddScore(this.scoreValue)
+        GameObject.Destroy(other.gameObject)
+        GameObject.Destroy(this.gameObject)
+    }
+}

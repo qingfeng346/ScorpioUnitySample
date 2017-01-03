@@ -1,0 +1,12 @@
+Background = {
+    scrollSpeed = -0.25,
+    tileSizeZ = 30,
+    startPosition = null,
+    function Awake() {
+        this.startPosition = this.transform.position
+    }
+    function Update() {
+        var newPosition = Mathf.Repeat(Time.time * this.scrollSpeed, this.tileSizeZ);
+        this.transform.position = this.startPosition + Vector3.forward * newPosition
+    }
+}

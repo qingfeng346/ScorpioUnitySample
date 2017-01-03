@@ -1,0 +1,61 @@
+EvasiveManeuver = {
+    xMin = -6,
+    xMax = 6,
+    zMin = -20,
+    zMax = 20,
+    tilt = 10,
+    dodge = 5,
+    smoothing = 7.5,
+	startWait = Vector2(0.5, 1),
+	maneuverTime = Vector2(1 ,2),
+	maneuverWait = Vector2(1, 2),
+    currentSpeed = 0,
+    targetManeuver = 0,
+    rigidbody = null,
+    function Awake() {
+        this.rigidbody = Util.GetComponent(this.gameObject, Rigidbody)
+    }
+    function Start() {
+        this.currentSpeed = this.rigidbody.velocity.z
+        YieldUtil.Start(WaitForSeconds(Random.Range (this.startWait.x, this.startWait.y)), this.Evade)
+    }
+    function Evade() {
+        if (this.com.IsDestroy) { return }
+        this.targetManeuver = Random.Range (1, this.dodge) * -Mathf.Sign (this.transform.position.x);
+        YieldUtil.Start(WaitForSeconds (Random.Range (this.maneuverTime.x, this.maneuverTime.y)), function() {
+            if (this.com.IsDestroy) { return }
+            this.targetManeuver = 0
+            YieldUtil.Start(WaitForSeconds(Random.Range (this.maneuverWait.x, this.maneuverWait.y)), this.Evade)
+        })
+    }
+    function FixedUpdate() {
+        var newManeuver = Mathf.MoveTowards (this.rigidbody.velocity.x, this.targetManeuver, this.smoothing * Time.deltaTime);
+		this.rigidbody.velocity = Vector3 (newManeuver, 0, this.currentSpeed);
+		this.rigidbody.position = Vector3
+		(
+			Mathf.Clamp(this.rigidbody.position.x, this.xMin, this.xMax), 
+			0, 
+			Mathf.Clamp(this.rigidbody.position.z, this.zMin, this.zMax)
+		);
+		this.rigidbody.rotation = Quaternion.Euler (0, 0, this.rigidbody.velocity.x * -this.tilt);
+    }
+}
+EnemyCom = {
+    fireRate = 1.5,
+    delay = 0.5,
+    scoreValue = 20,
+    Objects = {
+        shotSpawn = {Path = "Shot Spawn", Component = Transform}
+    }
+    function Start() {
+        YieldUtil.Start(WaitForSeconds(this.delay), this.Fire)
+    }
+    function Fire() {
+        if (this.com.IsDestroy) { return }
+        YieldUtil.Start(WaitForSeconds(this.fireRate), this.Fire)
+        PlaySound(this.gameObject)
+        var obj = GameObject.Instantiate(objs.EnemyBolt01, this.shotSpawn.position, this.shotSpawn.rotation)
+        AddComponent(obj, clone(Mover)).speed = 20
+        AddComponent(obj, clone(Asteroid)).scoreValue = 0
+    }
+}

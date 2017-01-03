@@ -1,0 +1,57 @@
+
+//**************以下是Unity引擎导入的类***************
+GameObject = import_type("UnityEngine.GameObject")
+Transform = import_type("UnityEngine.Transform")
+RectTransform = import_type("UnityEngine.RectTransform")
+AudioSource = import_type("UnityEngine.AudioSource")
+Rigidbody = import_type("UnityEngine.Rigidbody")
+Application = import_type("UnityEngine.Application")
+SystemInfo = import_type("UnityEngine.SystemInfo")
+NetworkReachability = import_type("UnityEngine.NetworkReachability")
+RuntimePlatform = import_type("UnityEngine.RuntimePlatform")
+Time = import_type("UnityEngine.Time")
+SendMessageOptions = import_type("UnityEngine.SendMessageOptions")
+Canvas = import_type("UnityEngine.Canvas")
+RenderMode = import_type("UnityEngine.RenderMode")
+Vector2 = import_type("UnityEngine.Vector2")
+Vector3 = import_type("UnityEngine.Vector3")
+Color = import_type("UnityEngine.Color")
+Input = import_type("UnityEngine.Input")
+KeyCode = import_type("UnityEngine.KeyCode")
+Mathf = import_type("UnityEngine.Mathf")
+Quaternion = import_type("UnityEngine.Quaternion")
+Random = import_type("UnityEngine.Random")
+GUIText = import_type("UnityEngine.GUIText")
+WaitForSeconds = import_type("UnityEngine.WaitForSeconds")
+//**************以上是Unity引擎导入的类***************
+//**************以下是游戏中的类***************
+Util = import_type("EngineUtil")
+YieldUtil = import_type("YieldUtil")
+ScriptManager = import_type("ScriptManager").GetInstance()
+TimerManager = import_type("TimerManager").GetInstance()
+Timer = import_type("Timer")
+TimerType = import_type("TimerType")
+//**************以上是游戏中的类***************
+//**************以下是经常用到的函数***************
+AddComponent = ScriptManager.AddComponent
+GetComponent = ScriptManager.GetComponent
+AddGameTimer = TimerManager.AddGameTimer
+AddRealTimer = TimerManager.AddRealTimer
+//**************以上是经常用到的函数***************
+function PlaySound(obj) {
+    Util.GetComponent(obj, AudioSource).Play()
+}
+function DestroyTime(obj) {
+    GameObject.Destroy(Util.GetGameObject(obj), 2)
+}
+loadfile("player")              //Player
+loadfile("Background")          //背景移动
+loadfile("DestroyByBoundary")   //移出屏幕自动删除
+loadfile("Asteroid")            //石头
+loadfile("Enemy")               //敌军
+loadfile("GameController")      //加载游戏管理
+
+AddComponent(objs.Player, Player)               //Player
+AddComponent(objs.Background, Background)       //背景
+AddComponent(objs.Boundary, DestroyByBoundary)  //移出屏幕自动删除
+AddComponent(objs.GameController, GameController)   //游戏管理
