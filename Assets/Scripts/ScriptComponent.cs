@@ -1,92 +1,114 @@
-﻿using UnityEngine;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Scorpio;
-public class ScriptComponent : MonoBehaviour {
-    public string Name = "";            //脚本Table名称，删除脚本时根据此字段做关键字
-    private Script m_Script;            //脚本引擎
-    public ScriptTable Table { get; private set; }
-    public bool IsDestroy { get; private set; }
-    public void Initialize(Script script, ScriptTable table, string name) {
-        m_Script = script;
-        Table = table;
-        Name = name;
-        table.SetValue("gameObject", script.CreateUserdata(this.gameObject));
-        table.SetValue("transform", script.CreateUserdata(this.transform));
-        table.SetValue("com", script.CreateUserdata(this));
-		FindChild(Table.GetValue("Objects") as ScriptTable);
-        OnStart();
+using UnityEngine;
+public class ScriptComponent : ScriptComponentBase
+{
+    public bool IsDestroy { get; private set; } = false;
+    public override ScriptInstance Initialize (ScriptInstance table, string name) {
+        base.Initialize (table, name);
+        if (table.GetValue (ScriptComponentUpdate.StringUpdate).IsScriptObject) {
+            gameObject.AddComponent<ScriptComponentUpdate> ().Initialize (table, name);
+        }
+        if (table.GetValue (ScriptComponentFixedUpdate.StringFixedUpdate).IsScriptObject) {
+            gameObject.AddComponent<ScriptComponentFixedUpdate> ().Initialize (table, name);
+        }
+        table.SetValue ("gameObject", ScriptValue.CreateValue (this.gameObject));
+        table.SetValue ("transform", ScriptValue.CreateValue (this.transform));
+        table.SetValue ("com", ScriptValue.CreateValue (this));
+        // SetObjects(gameObject.GetComponent<ScriptComponentObjects>());
+        FindChild (Table.GetValue ("Objects").Get<ScriptMap> ());
+        RegisterButtonClick (Table.GetValue ("Buttons").Get<ScriptArray> ());
+        OnStart ();
+        return table;
     }
-    public void FindChild(ScriptTable objects) {
+    // void SetObjects(ScriptComponentObjects objects) {
+    //     if (objects == null) { return; }
+    //     foreach (var value in objects.values) {
+    //         if (!string.IsNullOrEmpty(value.name) && value.value != null) {
+    //             Table.SetValue(value.name, ScriptValue.CreateValue(value.value));
+    //         }
+    //     }
+    //     foreach (var click in objects.clicks) {
+    //         if (!string.IsNullOrEmpty(click.click) && click.button != null) {
+    //             var clickFunc = Table.GetValue (click.click).Get<ScriptFunction> ();
+    //             if (clickFunc == null) { continue; }
+    //             ScriptUtil.RegisterOnClick(click.button, clickFunc, !click.keepClick, Value, click.mute, new ScriptValue(click.args));
+    //         }
+    //     }
+    // }
+    void FindChild (ScriptMap objects) {
         if (objects == null) { return; }
-        var itor = objects.GetIterator();
-        while (itor.MoveNext()) {
-            var info = itor.Current.Value as ScriptTable;
-            var component = info.GetValue("Component").ObjectValue as Type;
-            Table.SetValue(itor.Current.Key,
-                component == null ?
-                m_Script.CreateObject(EngineUtil.FindChild(gameObject, info.GetValue("Path").ToString())) :
-                m_Script.CreateObject(EngineUtil.FindChild(gameObject, info.GetValue("Path").ToString(), component)));
+        foreach (var info in objects) {
+            var component = info.Value.GetValue ("Component").Get<ScriptObject> ();
+            var path = info.Value.GetValue ("Path").ToString ();
+            Table.SetValue (info.Key.ToString (), ScriptValue.CreateValue (component == null ? EngineUtil.FindChild (gameObject, path) : EngineUtil.FindChild (gameObject, path, component.Type)));
         }
     }
-    public void OnStart() {
-		Call("Awake");
+    void RegisterButtonClick (ScriptArray buttons) {
+        if (buttons == null) { return; }
+        foreach (var pair in buttons) {
+            var info = pair.Get<ScriptMap> ();
+            if (info == null) { continue; }
+            var click = Table.GetValue (info.GetValue ("Click").ToString ()).Get<ScriptFunction> ();
+            if (click == null) { continue; }
+            ScriptUtil.RegisterOnClick (EngineUtil.FindChild (gameObject, info.GetValue ("Path").ToString ()), 
+                click, 
+                !info.GetValue ("Keep").IsTrue, 
+                Value, 
+                info.GetValue("Mute").IsTrue,
+                info.GetValue("Args"));
+        }
+    }
+    void OnStart () {
+        Call ("Awake");
     }
     void Start() {
-		Call("Start");
+        Call ("Start");
     }
-    void OnEnable() {
-		Call("OnEnable");
+    void OnTriggerEnter (Collider collider) {
+        Call ("OnTriggerEnter", collider);
     }
-    void OnDisable() {
-		Call("OnDisable");
+    void OnTriggerExit (Collider collider) {
+        Call ("OnTriggerExit", collider);
     }
-	void OnSpawn() {
-		Call ("OnSpawn");
-	}
-	void OnDespawn() {
-		Call ("OnDespawn");
-	}
-	void OnTriggerEnter(Collider collider) {
-		Call ("OnTriggerEnter", collider);
-	}
-	void OnTriggerExit(Collider collider) {
-		Call ("OnTriggerExit", collider);
-	}
-	void OnTriggerEnter2D(Collider2D collider) {
-		Call ("OnTriggerEnter2D", collider);
-	}
-	void OnTriggerExit2D(Collider2D collider) {
-		Call ("OnTriggerExit2D", collider);
-	}
-	void OnMouseDown() {
-		Call ("OnMouseDown");
-	}
-	void OnMouseEnter() {
-		Call ("OnMouseEnter");
-	}
-	void OnMouseExit() {
-		Call ("OnMouseExit");
-	}
-	void OnMouseUp() {
-		Call ("OnMouseUp");
-	}
-	void OnMouseUpAsButton() {
-		Call ("OnMouseUpAsButton");
-	}
-    void OnDestroy() {
+    void OnTriggerEnter2D (Collider2D collider) {
+        Call ("OnTriggerEnter2D", collider);
+    }
+    void OnTriggerExit2D (Collider2D collider) {
+        Call ("OnTriggerExit2D", collider);
+    }
+    void OnEnable () {
+        Call ("OnEnable");
+    }
+    void OnDisable () {
+        Call ("OnDisable");
+    }
+    void OnDestroy()
+    {
         this.IsDestroy = true;
+        Call ("OnDestroy");
     }
-    void OnCall(ScriptTable table) {
-        Call((string)table.GetValue("Func").ObjectValue, table.GetValue("Args"));
+    void OnSpawn () {
+        Call ("OnSpawn");
     }
-    protected void Call(string func, params object[] args) {
-        if (Table != null && Table.HasValue(func)) {
-            try {
-                ((ScriptFunction)Table.GetValue(func)).call(args);
-            } catch (Exception e) {
-                Debug.LogError(string.Format("ScriptComponent.Call is error func:{0}  {1}{2}", func, Table.Script.GetStackInfo(), e.ToString()));
-            }
+    void OnDespawn () {
+        Call ("OnDespawn");
+    }
+    void OnCall (ScriptMap table) {
+        Call (table.GetValue ("Func").ToString (), table.GetValue ("Args"));
+    }
+}
+public static class ScriptComponentExtension {
+    public static void CallScript (this Component component, string func, params object[] args) {
+        if (component == null) { return; }
+        CallScript (component.gameObject, func, args);
+    }
+    public static void CallScript (this GameObject obj, string func, params object[] args) {
+        if (obj == null) { return; }
+        var coms = obj.GetComponents<ScriptComponent> ();
+        foreach (var com in coms) {
+            com.Call (func, args);
         }
     }
 }

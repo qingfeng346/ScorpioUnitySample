@@ -27,14 +27,15 @@ WaitForSeconds = import_type("UnityEngine.WaitForSeconds")
 //**************以下是游戏中的类***************
 Util = import_type("EngineUtil")
 YieldUtil = import_type("YieldUtil")
-ScriptManager = import_type("ScriptManager").GetInstance()
+ScriptUtil = import_type("ScriptUtil")
+ScriptManager = import_type("ScriptManager").Instance
 TimerManager = import_type("TimerManager").GetInstance()
 Timer = import_type("Timer")
 TimerType = import_type("TimerType")
 //**************以上是游戏中的类***************
 //**************以下是经常用到的函数***************
-AddComponent = ScriptManager.AddComponent
-GetComponent = ScriptManager.GetComponent
+AddComponent = ScriptUtil.AddComponent
+GetComponent = ScriptUtil.GetComponent
 AddGameTimer = TimerManager.AddGameTimer
 AddRealTimer = TimerManager.AddRealTimer
 //**************以上是经常用到的函数***************

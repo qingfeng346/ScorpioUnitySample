@@ -9,7 +9,7 @@ GameController = {
     scoreText,
     restartText,
     gameOverText,
-    function Awake() {
+    Awake() {
         this.scoreText = Util.GetComponent(objs.scoreText, GUIText)
         this.restartText = Util.GetComponent(objs.restartText, GUIText)
         this.gameOverText = Util.GetComponent(objs.gameOverText, GUIText)
@@ -19,18 +19,18 @@ GameController = {
         this.restartText.text = ""
         this.gameOverText.text = ""
         this.UpdateScore()
-        YieldUtil.Start(WaitForSeconds(this.startWait), this.SpawnWaves)
+        YieldUtil.Start(WaitForSeconds(this.startWait), this.SpawnWaves.bind(this))
     }
-    function Update() {
+    Update() {
         if (this.restart) {
             if (Input.GetKeyDown (KeyCode.R)) {
 				Application.LoadLevel (Application.loadedLevel);
 			}
         }
     }
-    function SpawnWaves() {
-        if (this.gameOver) return;
-        YieldUtil.Start(WaitForSeconds(this.spawnWait), this.SpawnWaves)
+    SpawnWaves() {
+        if (this.gameOver) { return; }
+        YieldUtil.Start(WaitForSeconds(this.spawnWait), this.SpawnWaves.bind(this))
         var index = math.floor(Random.Range (0, 4))
         var hazard = null
         if (index < 3) {
@@ -52,16 +52,16 @@ GameController = {
             AddComponent(obj, clone(EnemyCom))
         }
     }
-    function AddScore (newScoreValue)
+    AddScore (newScoreValue)
 	{
 		this.score += newScoreValue
 		this.UpdateScore ()
 	}
-    function UpdateScore ()
+    UpdateScore ()
 	{
 		this.scoreText.text = "Score: " + this.score
 	}
-	function GameOver ()
+	GameOver ()
 	{
 		this.gameOverText.text = "Game Over!";
         this.restartText.text = "Press 'R' for Restart"

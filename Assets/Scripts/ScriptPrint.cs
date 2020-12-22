@@ -1,26 +1,24 @@
 ﻿using UnityEngine;
 using Scorpio;
+using System.Text;
 
 public class ScriptPrint : ScorpioHandle {
-    public object Call(ScriptObject[] args) {
-        var stackInfo = ScriptManager.GetInstance().GetScript().GetCurrentStackInfo();
+    public ScriptValue Call(ScriptValue thisObject, ScriptValue[] args, int length)
+    {
+        var builder = new StringBuilder();
+        var stackInfo = ScriptManager.Instance.GetScript().GetStackInfo();
+        builder.Append ($"{stackInfo.Breviary}:{stackInfo.Line} ");
         var prefix = stackInfo.Breviary + ":" + stackInfo.Line + " : ";
-        string str = "";
-        for (int i = 0; i < args.Length; ++i) {
-            str += args[i].ToString() + " ";
+        for (int i = 0; i < length; ++i) {
+            if (i != 0) { builder.Append ("    "); }
+            builder.Append (args[i].ToString ());
         }
-        Debug.Log(prefix + str);
-        return null;
+        Debug.Log(builder.ToString());
+        return ScriptValue.Null;
     }
 }
 public class ScriptLoadScript : ScorpioHandle {
-    private Script m_script;
-    public ScriptLoadScript(Script script) {
-        m_script = script;
-    }
-    public object Call(ScriptObject[] args) {
-        ScriptString str = args[0] as ScriptString;
-        Util.Assert(str != null, m_script, "LoadScript 参数必须是 string");
-        return ScriptManager.GetInstance().LoadFile(str.Value);
+    public ScriptValue Call(ScriptValue thisObject, ScriptValue[] args, int length) {
+        return ScriptManager.Instance.LoadFile(args[0].ToString());
     }
 }

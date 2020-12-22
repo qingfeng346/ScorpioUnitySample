@@ -140,9 +140,9 @@ public class Timer {
 #if UNITY_EDITOR
                 string target = CallBack.Target != null ? CallBack.Target.GetType().Name : "";
                 string method = CallBack.Method != null ? CallBack.Method.ToString() : "";
-				Debug.LogError(string.Format("TimeCallBack is error {0} - {1} stack : {2}{3}", target, method, ScriptManager.GetInstance().GetStackInfo(), ex.ToString()));
+				Debug.LogError(string.Format("TimeCallBack is error {0} - {1} stack : {2}{3}", target, method, "", ex.ToString()));
 #else
-				Debug.LogError(string.Format("TimeCallBack is error stack : {0}{1}", ScriptManager.GetInstance().GetStackInfo(), ex.ToString()));
+				Debug.LogError(string.Format("TimeCallBack is error stack : {0}{1}", "", ex.ToString()));
 #endif
             } else {
                 Debug.LogError(string.Format("TimeCallBack is error : {0}", ex.ToString()));

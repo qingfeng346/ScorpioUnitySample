@@ -29,10 +29,5 @@ public static class EngineUtil {
         if (obj == null) return null;
         return obj.GetComponent(type);
     }
-    public static GameObject GetGameObject(Component com) {
-        return com == null ? null : com.gameObject;
-    }
-    public static GameObject GetGameObject(GameObject obj) {
-        return obj;
-    }
+    public static GameObject GetGameObject (UnityEngine.Object obj) { return obj is Component ? (obj as Component).gameObject : obj as GameObject; }
 }

@@ -9,6 +9,6 @@ public class ScriptLaunch : MonoBehaviour {
     }
     public Value[] values;
     void Start() {
-        ScriptManager.GetInstance().Start(values);
+        ScriptManager.Instance.Start(values);
     }
 }
