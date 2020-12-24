@@ -19,6 +19,7 @@ public class ScriptManager {
         m_Script.SetGlobal("print", m_Script.CreateFunction(new ScriptPrint()));            //载入print函数
         m_Script.SetGlobal("loadfile", m_Script.CreateFunction(new ScriptLoadScript()));    //载入loadfile函数  根据自己需求自己修改，如果是普通路径可以查看 require 函数
         DelegateFactory.Initialize(m_Script);
+        ScorpioClassManager.Initialize(m_Script);
     }
     public Script GetScript() { return m_Script; }
     public void Start(ScriptLaunch.Value[] values) {

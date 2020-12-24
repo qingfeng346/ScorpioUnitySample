@@ -8,7 +8,7 @@ public static class EngineUtil {
     public static GameObject FindChild(GameObject go, string str) {
         if (go == null) return null;
         if (string.IsNullOrEmpty(str)) return go;
-        Transform trans = go.transform.FindChild(str);
+        Transform trans = go.transform.Find(str);
         if (trans == null) return null;
         return trans.gameObject;
     }
@@ -30,4 +30,8 @@ public static class EngineUtil {
         return obj.GetComponent(type);
     }
     public static GameObject GetGameObject (UnityEngine.Object obj) { return obj is Component ? (obj as Component).gameObject : obj as GameObject; }
+    public static void TestFunc(this GameObject gameObject)
+    {
+        Debug.Log(gameObject.name);
+    }
 }
