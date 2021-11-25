@@ -43,14 +43,13 @@ public class DelegateFactory : IDelegateFactory {
             return (buildType == 0 ? Template : TemplateIf).Replace("__DelegateList", DelegateList()).Replace("__CreateDelegate", CreateDelegate(buildType));
         }
         string DelegateList() {
-            return "";
-            //     var builder = new StringBuilder();
-            //     foreach (var type in m_Delegates) {
-            //         var fullName = ScorpioReflectUtil.GetFullName(type);
-            //         builder.Append($@"
-            // script.SetGlobal(""{fullName}"", ScriptValue.CreateValue(typeof({fullName})));");
-            //     }
-            //     return builder.ToString();
+            var builder = new StringBuilder();
+            foreach (var type in m_Delegates) {
+                var fullName = ScorpioReflectUtil.GetFullName(type);
+                builder.Append($@"
+        script.SetGlobal(""{fullName}"", ScriptValue.CreateValue(typeof({fullName})));");
+            }
+            return builder.ToString();
         }
         string CreateDelegate(int buildType) {
             var builder = new StringBuilder();

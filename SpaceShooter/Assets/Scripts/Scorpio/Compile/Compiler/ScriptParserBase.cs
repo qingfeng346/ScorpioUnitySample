@@ -1,18 +1,41 @@
-using System;
+using System.IO;
+using System.Collections.Generic;
 using Scorpio.Compile.Exception;
 namespace Scorpio.Compile.Compiler {
     /// <summary> 编译脚本 </summary>
-    public partial class ScriptParser {         
-        private Token[] m_listTokens;           //token列表
-        private int m_indexToken;               //当前读到token
-        private string[] ignoreFunctions;       //编译忽略的全局函数
-        public ScriptParser(Token[] listTokens, string strBreviary, string[] ignoreFunctions) {
-            this.Breviary = strBreviary;
-            this.m_listTokens = listTokens;
-            this.ignoreFunctions = ignoreFunctions;
+    public partial class ScriptParser {
+        private readonly string[] EmptyArrayString = new string[0];
+        private Token[] m_listTokens;               //token列表
+        private int m_indexToken;                   //当前读到token
+        private CompileOption compileOption;        //编译选项
+        private IEnumerable<string> searchPaths;    //searchPaths
+        private List<string> allSearchPaths;        //import文件搜索目录searchPaths
+        private HashSet<string> allDefines;         //全局defines+本文件定义的define
+        public List<ScriptParser> parsers;          //import列表
+        public ScriptParser(ScriptLexer lexer, IEnumerable<string> searchPaths, CompileOption compileOption, List<ScriptParser> parsers) {
+            this.m_listTokens = lexer.GetTokens().ToArray();
+            this.Breviary = lexer.Breviary;
+            this.compileOption = compileOption ?? CompileOption.Default;
+            this.parsers = parsers;
+            this.searchPaths = searchPaths;
+            this.allSearchPaths = new List<string>(searchPaths ?? EmptyArrayString);
+            this.allSearchPaths.AddRange(this.compileOption.searchPaths ?? EmptyArrayString);
+            this.allDefines = new HashSet<string>(this.compileOption.defines ?? EmptyArrayString);
         }
         /// <summary> 当前解析的脚本摘要 </summary>
         public string Breviary { get; private set; }
+        string SearchImportFile(string fileName) {
+            if (File.Exists(fileName)) {
+                return fileName;
+            }
+            foreach (var path in allSearchPaths) {
+                string file = Path.Combine(path, fileName);
+                if (File.Exists(file)) {
+                    return file;
+                }
+            }
+            throw new ParserException(this, $"import not found file : {fileName}", PeekToken());
+        }
         /// <summary> 是否还有更多需要解析的语法 </summary>
         bool HasMoreTokens() {
             return m_indexToken < m_listTokens.Length;
@@ -20,17 +43,17 @@ namespace Scorpio.Compile.Compiler {
         int GetSourceLine() {
             return PeekToken().SourceLine;
         }
+        /// <summary> 返回第一个Token </summary>
+        public Token PeekToken() {
+            if (!HasMoreTokens())
+                throw new ParserException(this, "PeekToken - 没有更多的Token");
+            return m_listTokens[m_indexToken];
+        }
         /// <summary> 获得第一个Token </summary>
         Token ReadToken() {
             if (!HasMoreTokens())
                 throw new ParserException(this, "ReadToken - 没有更多的Token");
             return m_listTokens[m_indexToken++];
-        }
-        /// <summary> 返回第一个Token </summary>
-        Token PeekToken() {
-            if (!HasMoreTokens())
-                throw new ParserException(this, "PeekToken - 没有更多的Token");
-            return m_listTokens[m_indexToken];
         }
         Token LastToken() {
             if (m_indexToken <= 0)
@@ -50,10 +73,17 @@ namespace Scorpio.Compile.Compiler {
                 throw new ParserException(this, "Comma ',' expected.", token);
         }
         /// <summary> 读取 变量字符 </summary>
-        String ReadIdentifier() {
+        string ReadIdentifier() {
             Token token = ReadToken();
             if (token.Type != TokenType.Identifier)
                 throw new ParserException(this, "Identifier expected.", token);
+            return token.Lexeme.ToString();
+        }
+        /// <summary> 读取 字符串 </summary>
+        string ReadString() {
+            Token token = ReadToken();
+            if (token.Type != TokenType.String)
+                throw new ParserException(this, "String expected.", token);
             return token.Lexeme.ToString();
         }
         /// <summary> 读取 { </summary>
@@ -115,6 +145,12 @@ namespace Scorpio.Compile.Compiler {
             Token token = ReadToken();
             if (token.Type != TokenType.Catch)
                 throw new ParserException(this, "Catch 'catch' expected.", token);
+        }
+        /// <summary> 读取 = </summary>
+        void ReadAssign() {
+            Token token = ReadToken();
+            if (token.Type != TokenType.Assign)
+                throw new ParserException(this, "Catch '=' expected.", token);
         }
     }
 }

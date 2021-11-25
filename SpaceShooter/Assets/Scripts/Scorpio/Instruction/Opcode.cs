@@ -1,7 +1,7 @@
 namespace Scorpio.Instruction {
     //指令集大类型
     public enum OpcodeType : byte {
-        None,       //无效类型
+        Nop,        //空操作
         Load,       //压栈
         New,        //new
         Store,      //取栈
@@ -11,7 +11,7 @@ namespace Scorpio.Instruction {
     }
     //指令类型, 枚举使用byte 类型 switch 会比int 稍快一丢丢
     public enum Opcode : byte {
-        None,
+        Nop,
 
         //压栈操作
         LoadBegin = 1,
@@ -33,18 +33,25 @@ namespace Scorpio.Instruction {
         LoadBase,               //push base value
         CopyStackTop,           //复制栈顶的数据
         CopyStackTopIndex,      //复制栈顶的数据
+        ToGlobal,               //转为Global变量
+        ToGlobalFunction,       //转为Global函数
         LoadEnd,
 
 
         //New操作
         NewBegin = LoadBegin + 40,
-        NewFunction,            //load a new function
-        NewLambadaFunction,     //load a new lambada function
+        NewFunction,            //new function
+        NewLambdaFunction,      //new lambda function
         NewArray,               //new array
         NewMap,                 //new map
         NewMapObject,           //new map with key contain object
         NewType,                //new class
-        NewTypeParent,          //new class with parent
+        [System.Obsolete]
+        NewTypeParent,          //new class with parent, 已弃用deprecated,兼容旧版本,暂时不能删除
+        NewMapString,           //new map only string key
+        NewAsyncFunction,       //new async function
+        NewAsyncLambdaFunction, //new async lambda function
+        NewAsyncType,           //new async type
         NewEnd,
 
         //取栈操作
@@ -67,16 +74,16 @@ namespace Scorpio.Instruction {
 
         //运算指令
         ComputeBegin = StoreBegin + 30,
-        Plus,
-        Minus,
-        Multiply,
-        Divide,
-        Modulo,
-        InclusiveOr,
-        Combine,
-        XOR,
-        Shr,
-        Shi,
+        Plus,                   // +
+        Minus,                  // -
+        Multiply,               // *
+        Divide,                 // /
+        Modulo,                 // %
+        InclusiveOr,            // |
+        Combine,                // &
+        XOR,                    // ^
+        Shr,                    // >>
+        Shi,                    // <<
         FlagNot,                //取反操作
         FlagMinus,              //取负操作
         FlagNegative,           //取非操作
@@ -84,14 +91,16 @@ namespace Scorpio.Instruction {
 
         //比较指令
         CompareBegin = ComputeBegin + 20,
-        Greater,
-        GreaterOrEqual,
-        Less,
-        LessOrEqual,
-        Equal,
-        NotEqual,
-        And,
-        Or,
+        Greater,                //>
+        GreaterOrEqual,         //>=
+        Less,                   //<
+        LessOrEqual,            //<=
+        Equal,                  //==
+        NotEqual,               //!=
+        And,                    //&&
+        Or,                     //||
+        EqualReference,         //===
+        NotEqualReference,      //!==
         CompareEnd,
 
         //跳转指令
@@ -117,6 +126,7 @@ namespace Scorpio.Instruction {
         TryTo,                  //异常跳转
         TryEnd,                 //try结束
         Throw,                  //throw
+        Await,                  //await
         JumpEnd,
     }
 }

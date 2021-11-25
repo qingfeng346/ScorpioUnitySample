@@ -57,7 +57,7 @@ namespace Scorpio {
         internal ScriptValue[] m_Objects;
         internal int m_Length;
         
-        public ScriptArray(Script script) : base(ObjectType.Array, script.TypeArrayValue) {
+        public ScriptArray(Script script) : base(ObjectType.Array, script.TypeArray) {
             m_Script = script;
             m_Objects = ScriptValue.EMPTY;
             m_Length = 0;
@@ -91,42 +91,35 @@ namespace Scorpio {
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() { return new Enumerator(this); }
         public IEnumerator<ScriptValue> GetIterator() { return new Enumerator(this); }
 
+        public override ScriptValue GetValue(double index) {
+            return this[(int)index];
+        }
+        public override ScriptValue GetValue(long index) {
+            return this[(int)index];
+        }
         public override ScriptValue GetValue(object index) {
-            if (index is double || index is long || index is sbyte || index is byte || index is short || index is ushort || index is int || index is uint || index is float) {
-                var i = Convert.ToInt32(index);
-                if (i >= m_Length) return ScriptValue.Null;
-                if (i < 0) throw new ExecutionException($"数组获取变量索引小于0 index : {i}");
-                return m_Objects[i];
-            }
-            return base.GetValue(index);
+            return this[Convert.ToInt32(index)];
+        }
+        public override void SetValue(double index, ScriptValue value) {
+            this[(int)index] = value;
+        }
+        public override void SetValue(long index, ScriptValue value) {
+            this[(int)index] = value;
         }
         public override void SetValue(object index, ScriptValue value) {
-            if (index is double || index is long || index is sbyte || index is byte || index is short || index is ushort || index is int || index is uint || index is float) {
-                var i = Convert.ToInt32(index);
-                if (i >= m_Length) {
-                    EnsureCapacity(i + 1);
-                    m_Length = i + 1;
-                } else if (i < 0) {
-                    throw new ExecutionException($"数组设置变量索引小于0 index : {i}");
-                }
-                m_Objects[i] = value;
-            } else {
-                base.SetValue(index, value);
-            }
+            this[Convert.ToInt32(index)] = value;
         }
 
         public virtual ScriptValue this[int i] {
             get {
-                if (i >= m_Length) return ScriptValue.Null;
-                if (i < 0) throw new ExecutionException($"数组获取变量索引小于0 index : {i}");
-                return m_Objects[i];
+                if (i < 0) throw new ExecutionException($"Array.get[] 索引小于0:{i}");
+                return i < m_Length ? m_Objects[i] : ScriptValue.Null;
             }
             set {
+                if (i < 0) throw new ExecutionException($"Array.set[] 索引小于0:{i}");
                 if (i >= m_Length) {
                     EnsureCapacity(i + 1);
                     m_Length = i + 1;
-                } else if (i < 0) {
-                    throw new ExecutionException($"数组设置变量索引小于0 index : {i}");
                 }
                 m_Objects[i] = value;
             }
@@ -149,8 +142,7 @@ namespace Scorpio {
             m_Objects[m_Length++] = value;
         }
         public void Insert(int index, ScriptValue value) {
-            if (index < 0 || index >= m_Length)
-                throw new ExecutionException($"Insert 索引小于0或超过最大值 index:{index}   length:{m_Length}");
+            if (index < 0 || index > m_Length) throw new ExecutionException($"Array.Insert 索引小于0或超过最大值 index:{index} length:{m_Length}");
             if (m_Length == m_Objects.Length) {
                 EnsureCapacity(m_Length + 1);
             }
@@ -167,8 +159,7 @@ namespace Scorpio {
             return false;
         }
         public void RemoveAt(int index) {
-            if (index < 0 || index >= m_Length)
-                throw new ExecutionException($"RemoveAt 索引小于0或超过最大值 index:{index}  length:{m_Length}");
+            if (index < 0 || index >= m_Length) throw new ExecutionException($"Array.RemoveAt 索引小于0或超过最大值 index:{index} length:{m_Length}");
             m_Length--;
             Array.Copy(m_Objects, index + 1, m_Objects, index, m_Length - index);
             m_Objects[m_Length].valueType = ScriptValue.nullValueType;
@@ -198,8 +189,7 @@ namespace Scorpio {
             return -1;
         }
         public void Resize(int length) {
-            if (length < 0)
-                throw new ExecutionException($"Resize长度小于0 length:{length}");
+            if (length < 0)  throw new ExecutionException($"Array.Resize长度小于0:{length}");
             if (length > m_Length) {
                 EnsureCapacity(length);
                 m_Length = length;
@@ -227,8 +217,7 @@ namespace Scorpio {
             return m_Length > 0 ? m_Objects[m_Length - 1] : ScriptValue.Null;
         }
         public ScriptValue PopFirst() {
-            if (m_Length == 0)
-                throw new ExecutionException("Array PopFirst 数组长度为 0");
+            if (m_Length <= 0)  throw new ExecutionException($"Array.PopFirst 数组长度为0");
             var value = m_Objects[0];
             RemoveAt(0);
             return value;
@@ -241,14 +230,11 @@ namespace Scorpio {
             return value;
         }
         public ScriptValue PopLast() {
-            if (m_Length == 0)
-                throw new ExecutionException("Array PopLast 数组长度为0");
+            if (m_Length <= 0)  throw new ExecutionException($"Array.PopLast 数组长度为0");
             return m_Objects[--m_Length];
         }
         public ScriptValue SafePopLast() {
-            if (m_Length == 0)
-                return ScriptValue.Null;
-            return m_Objects[--m_Length];
+            return m_Length == 0 ? ScriptValue.Null : m_Objects[--m_Length];
         }
         //仅限于number和string
         public T[] ToArray<T>() {
@@ -299,16 +285,15 @@ namespace Scorpio {
             }
             return ret;
         }
-        public override string ToString() { return ToJson(false); }
-        public override string ToJson(bool supportKeyNumber) {
-            var builder = new StringBuilder();
+        public override string ToString() { return new JsonSerializer().ToJson(this); }
+        internal override void ToJson(JsonSerializer jsonSerializer) {
+            var builder = jsonSerializer.m_Builder;
             builder.Append("[");
             for (int i = 0; i < m_Length; ++i) {
                 if (i != 0) builder.Append(",");
-                builder.Append(m_Objects[i].ToJson(supportKeyNumber));
+                jsonSerializer.Serializer(m_Objects[i]);
             }
             builder.Append("]");
-            return builder.ToString();
         }
     }
 }

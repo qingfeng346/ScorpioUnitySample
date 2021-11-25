@@ -2,9 +2,10 @@ using Scorpio.Userdata;
 namespace Scorpio.Library {
     public partial class LibraryUserdata {
         public static void Load(Script script) {
-            var map = new ScriptMap(script);
+            var map = new ScriptMapString(script);
             map.SetValue("fieldTypeOf", script.CreateFunction(new fieldTypeOf()));
             map.SetValue("isType", script.CreateFunction(new isType()));
+            map.SetValue("extend", script.CreateFunction(new extend()));
             script.SetGlobal("userdata", new ScriptValue(map));
         }
         private class fieldTypeOf : ScorpioHandle {
@@ -18,6 +19,12 @@ namespace Scorpio.Library {
                     return args[1].scriptValue.Type.IsAssignableFrom(args[0].scriptValue.Type) ? ScriptValue.True : ScriptValue.False;
                 }
                 return ScriptValue.False;
+            }
+        }
+        private class extend : ScorpioHandle {
+            public ScriptValue Call(ScriptValue thisObject, ScriptValue[] args, int length) {
+                TypeManager.GetType(args[0].scriptValue.Type).SetValue(args[1].ToString(), args[2]);
+                return ScriptValue.Null;
             }
         }
     }

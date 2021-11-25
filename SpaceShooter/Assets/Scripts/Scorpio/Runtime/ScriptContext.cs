@@ -7,15 +7,15 @@ namespace Scorpio.Runtime {
     //注意事项:
     //所有调用另一个程序集的地方 都要new一个新的 否则递归调用会相互影响
     public partial class ScriptContext {
-        private const int ValueCacheLength = 128; //函数最大调用层级,超过会堆栈溢出
-        private const int StackValueLength = 256; //堆栈数据最大数量
-        private const int VariableValueLength = 128; //局部变量最大数量
-        private const int TryStackLength = 16; //最多可以嵌套多少层try catch
+        internal const int ValueCacheLength = 128; //函数最大调用层级,超过会堆栈溢出
+        internal const int StackValueLength = 256; //堆栈数据最大数量
+        internal const int VariableValueLength = 128; //局部变量最大数量
+        internal const int TryStackLength = 16; //最多可以嵌套多少层try catch
         
-        protected static ScriptValue[][] VariableValues = new ScriptValue[ValueCacheLength][]; //局部变量数据
-        protected static ScriptValue[][] StackValues = new ScriptValue[ValueCacheLength][]; //堆栈数据
-        protected static int[][] TryStackValues = new int[ValueCacheLength][]; //try catch数据
-        protected static int VariableValueIndex = 0;
+        internal static ScriptValue[][] VariableValues = new ScriptValue[ValueCacheLength][]; //局部变量数据
+        internal static ScriptValue[][] StackValues = new ScriptValue[ValueCacheLength][]; //堆栈数据
+        internal static int[][] TryStackValues = new int[ValueCacheLength][]; //try catch数据
+        internal static int VariableValueIndex = 0;
         static ScriptContext() {
             for (var i = 0; i < StackValues.Length; ++i) {
                 StackValues[i] = new ScriptValue[StackValueLength];
@@ -28,8 +28,8 @@ namespace Scorpio.Runtime {
             }
         }
 
-        public readonly Script m_script; //脚本类
-        private readonly ScriptGlobal m_global; //global
+        public Script m_script; //脚本类
+        private ScriptGlobal m_global; //global
 
         private readonly double[] constDouble; //double常量
         private readonly long[] constLong; //long常量
@@ -56,5 +56,11 @@ namespace Scorpio.Runtime {
             m_FunctionData = functionData;
             m_scriptInstructions = functionData.scriptInstructions;
         }
+#if SCORPIO_DEBUG
+        public void SetScript(Script script) {
+            m_script = script;
+            m_global = script.Global;
+        }
+#endif
     }
 }

@@ -1,6 +1,7 @@
 using System.Reflection;
 using Scorpio.Exception;
 using System;
+using Scorpio.Tools;
 namespace Scorpio.Userdata {
     public class UserdataProperty : UserdataVariable {
         private Type m_Type;
@@ -11,15 +12,12 @@ namespace Scorpio.Userdata {
             FieldType = info.PropertyType;
         }
         public override object GetValue(object obj) {
-            if (m_Property.CanRead)
-                return m_Property.GetValue(obj, null);
-            throw new ExecutionException($"Type:[{m_Type.FullName}]  Property:[{m_Property.Name}] 不支持 GetValue");
+            Util.Assert(m_Property.CanRead, $"Type:[{m_Type.FullName}]  Property:[{m_Property.Name}] 不支持 GetValue");
+            return m_Property.GetValue(obj, null);
         }
         public override void SetValue(object obj, object val) {
-            if (m_Property.CanWrite)
-                m_Property.SetValue(obj, val, null);
-            else
-                throw new ExecutionException($"Type:[{m_Type.FullName}]  Property:[{m_Property.Name}] 不支持 SetValue");
+            Util.Assert(m_Property.CanWrite, $"Type:[{m_Type.FullName}]  Property:[{m_Property.Name}] 不支持 SetValue");
+            m_Property.SetValue(obj, val, null);
         }
     }
 }

@@ -1,15 +1,23 @@
+using System.IO;
+using System.Text;
 using System.Collections.Generic;
 using Scorpio.Compile.Exception;
 using Scorpio.Compile.CodeDom;
 using Scorpio.Compile.CodeDom.Temp;
 using Scorpio.Instruction;
+using Scorpio.Tools;
 namespace Scorpio.Compile.Compiler {
-    
     /// <summary> 编译脚本 </summary>
     public partial class ScriptParser {
+        private struct TypeFunction {
+            public long nameIndex;
+            public long funcIndex;
+            public long async;
+        }
         public List<double> ConstDouble { get; private set; } = new List<double>();                                         //所有的常量 double
         public List<long> ConstLong { get; private set; } = new List<long>();                                               //所有的常量 long
         public List<string> ConstString { get; private set; } = new List<string>();                                         //所有的常量 string
+        public ScriptFunctionData Context { get; private set; }                                                             //解析后主执行
         public List<ScriptFunctionData> Functions { get; private set; } = new List<ScriptFunctionData>();                   //定义的所有 function
         public List<ScriptClassData> Classes { get; private set; } = new List<ScriptClassData>();                           //定义的所有 class
         private Stack<List<ScriptInstructionCompiler>> m_Breaks = new Stack<List<ScriptInstructionCompiler>>();             //breaks
@@ -73,7 +81,6 @@ namespace Scorpio.Compile.Compiler {
             return executable;
         }
         /// <summary> 获取一个double常量的索引 </summary>
-        /// <param name="value">double常量</param>
         int GetConstDouble(double value) {
             var index = ConstDouble.IndexOf(value);
             if (index < 0) {
@@ -110,17 +117,71 @@ namespace Scorpio.Compile.Compiler {
             return m_scriptExecutable.AddScriptInstruction(opcode, 0, line == -1 ? PeekToken().SourceLine : line);
         }
         /// <summary> 解析脚本 </summary>
-        public ScriptFunctionData Parse() {
+        public ScriptParser Parse() {
+            ParseMacro();
+            ParseImport();
             m_indexToken = 0;
             var executable = ParseStatementContext();
-            return new ScriptFunctionData() {
-                scriptInstructions = executable.ScriptInstructions,
-                variableCount = executable.VariableCount,
-                internalCount = executable.InternalCount,
-                parameterCount = 0,
-                param = false,
-                internals = new int[0],
-            };
+            Context = new ScriptFunctionData() {
+                                scriptInstructions = executable.ScriptInstructions,
+                                variableCount = executable.VariableCount,
+                                internalCount = executable.InternalCount,
+                                parameterCount = 0,
+                                param = false,
+                                internals = new int[0]};
+            return this;
+        }
+        /// <summary> 解析宏定义 </summary>
+        void ParseMacro() {
+            m_indexToken = 0;
+            var tokens = new List<Token>();
+            while (HasMoreTokens()) {
+                var token = ReadToken();
+                switch (token.Type) {
+                    case TokenType.MacroDefine:
+                        ParseMacroDefine();
+                        break;
+                    case TokenType.MacroIf:
+                        ParseMacroIf();
+                        break;
+                    case TokenType.MacroIfndef:
+                        ParseMacroIfndef();
+                        break;
+                    case TokenType.MacroElse:
+                    case TokenType.MacroElif:
+                        ParseMacroElse();
+                        break;
+                    case TokenType.MacroEndif:
+                        break;
+                    default:
+                        tokens.Add(token);
+                        break;
+                }
+            }
+            if (m_listTokens.Length != tokens.Count) {
+                m_listTokens = tokens.ToArray();
+            }
+        }
+        /// <summary> 解析 #import </summary>
+        void ParseImport() {
+            m_indexToken = 0;
+            var tokens = new List<Token>();
+            while (HasMoreTokens()) {
+                if (PeekToken().Type == TokenType.Import) {
+                    ReadToken();
+                    var fileName = ReadString();
+                    using (var stream = File.OpenRead(SearchImportFile(fileName))) {
+                        var buffer = new byte[stream.Length];
+                        Util.ReadBytes(stream, buffer);
+                        parsers.Add(new ScriptParser(new ScriptLexer(Script.Encoding.GetString(buffer), fileName), searchPaths, compileOption, parsers).Parse());
+                    }
+                } else {
+                    tokens.Add(ReadToken());
+                }
+            }
+            if (m_listTokens.Length != tokens.Count) {
+                m_listTokens = tokens.ToArray();
+            }
         }
         /// <summary> 解析整个文件 </summary>
         ScriptExecutable ParseStatementContext() { return ParseStatementBlock(ExecutableBlock.Context, false, true, TokenType.Finished); }
@@ -131,7 +192,6 @@ namespace Scorpio.Compile.Compiler {
         /// <summary> 解析一个代码块 </summary>
         ScriptExecutable ParseStatementBlock(ExecutableBlock block) { return ParseStatementBlock(block, true, true, TokenType.RightBrace); }
         /// <summary> 是否是父域的变量 </summary>
-        /// <param name="str">变量名</param>
         int IsParentVariable(string str) {
             int index = m_scriptExecutable.GetInternalIndex(str);
             if (index >= 0) { return index; }
@@ -168,6 +228,7 @@ namespace Scorpio.Compile.Compiler {
             }
             return EndExecutable(block);
         }
+        #region 解析块内容
         /// <summary> 解析单句代码内容 </summary>
         void ParseStatement() {
             var token = ReadToken();
@@ -201,7 +262,6 @@ namespace Scorpio.Compile.Compiler {
                     ParseClass();
                     return;
                 case TokenType.Function:
-                case TokenType.Sharp:
                     ParseFunction();
                     return;
                 case TokenType.Return:
@@ -236,25 +296,48 @@ namespace Scorpio.Compile.Compiler {
                 case TokenType.Throw:
                     ParseThrow();
                     return;
-                case TokenType.SemiColon: return;
-                default: throw new ParserException(this, "不支持的语法 ", token);
+                case TokenType.Await:
+                    ParseAwait();
+                    break;
+                case TokenType.Async:
+                    ParseAsync();
+                    break;
+                case TokenType.SemiColon: 
+                    return;
+                default:
+                    throw new ParserException(this, "不支持的语法 ", token);
             }
         }
         /// <summary> 解析var关键字 </summary>
         void ParseVar() {
-            m_scriptExecutable.AddIndex(ReadIdentifier());
-            while (true) {
-                switch (PeekToken().Type) {
-                    case TokenType.Comma: {
-                        ReadToken();
-                        m_scriptExecutable.AddIndex(ReadIdentifier());
-                        break;
+            //多返回值
+            if (PeekToken().Type == TokenType.LeftBrace) {
+                ReadToken();
+                var Returns = new List<string>();
+                Returns.Add(ReadIdentifier());
+                while (PeekToken().Type == TokenType.Comma) {
+                    ReadToken();
+                    Returns.Add(ReadIdentifier());
+                }
+                ReadRightBrace();
+                Returns.ForEach((value) => { m_scriptExecutable.AddIndex(value); });
+                ReadAssign();
+                PushObject(new CodeMultipleReturn(GetSourceLine()) { Returns = Returns, Value = GetOneObject() });
+            } else {
+                m_scriptExecutable.AddIndex(ReadIdentifier());
+                while (true) {
+                    switch (PeekToken().Type) {
+                        case TokenType.Comma: {
+                            ReadToken();
+                            m_scriptExecutable.AddIndex(ReadIdentifier());
+                            break;
+                        }
+                        case TokenType.Assign: {
+                            UndoToken();
+                            return;
+                        }
+                        default: return;
                     }
-                    case TokenType.Assign: {
-                        UndoToken();
-                        return;
-                    }
-                    default: return;
                 }
             }
         }
@@ -483,7 +566,7 @@ namespace Scorpio.Compile.Compiler {
             //next 函数索引
             var nextIndex = m_scriptExecutable.AddTempIndex();
             AddScriptInstruction(Opcode.LoadLocal, pairIndex);
-            AddScriptInstruction(Opcode.LoadValueString, GetConstString(ScriptConst.IteratorNext));
+            AddScriptInstruction(Opcode.LoadValueString, GetConstString(ScriptConstValue.IteratorNext));
             AddScriptInstruction(Opcode.StoreLocal, nextIndex);
             ReadRightParenthesis();
 
@@ -503,10 +586,14 @@ namespace Scorpio.Compile.Compiler {
         }
         /// <summary> 解析Class </summary>
         void ParseClass() {
-            var className = "";
-            var index = ParseClassContent(ref className);
+            var index = ParseClassContent(out var className, out var async);
             var sourceLine = PeekToken().SourceLine;
-            AddScriptInstruction(Opcode.NewType, index, sourceLine);
+            if (async) {
+                AddScriptInstruction(Opcode.NewAsyncType, index, sourceLine);
+            } else {
+                AddScriptInstruction(Opcode.NewType, index, sourceLine);
+            }
+            if (string.IsNullOrWhiteSpace(className)) { return; }
             if (m_scriptExecutable.Block == ExecutableBlock.Context) {
                 AddScriptInstruction(Opcode.StoreGlobalString, GetConstString(className), sourceLine);
             } else {
@@ -516,59 +603,73 @@ namespace Scorpio.Compile.Compiler {
         /// <summary> 解析一个class </summary>
         /// <param name="className">class名字</param>
         /// <returns>class的索引</returns>
-        int ParseClassContent(ref string className) {
+        int ParseClassContent(out string className, out bool async) {
             if (PeekToken().Type == TokenType.Identifier || PeekToken().Type == TokenType.String) {
                 className = ReadToken().Lexeme.ToString();  //类名
             } else {
-                className = $"{Breviary}:{PeekToken().SourceLine}";
+                className = "";
             }
             var parent = "";
             if (PeekToken().Type == TokenType.Colon) {
                 ReadToken();
                 parent = ReadIdentifier();
             }
-            var functions = new List<long>();           //所有的函数
+            var functions = new List<TypeFunction>();           //所有的函数
+            long nameIndex, funcIndex;
+            async = false;
             ReadLeftBrace();
             while (PeekToken().Type != TokenType.RightBrace) {
                 var token = ReadToken();
                 if (token.Type == TokenType.SemiColon) {
                     continue;
                 }
-                long nameIndex, funcIndex;
-                var functionName = "";
+                bool isAsync = token.Type == TokenType.Async;
+                if (isAsync) {
+                    async = true;
+                    token = ReadToken(); 
+                }
                 if (token.Type == TokenType.Identifier || token.Type == TokenType.String) {
                     var next = ReadToken();
                     if (next.Type == TokenType.LeftPar || next.Type == TokenType.LeftBrace) {
                         UndoToken();
                         UndoToken();
                         nameIndex = GetConstString(token.Lexeme.ToString());
-                        funcIndex = ParseFunctionContent(false, ref functionName);
+                        funcIndex = ParseFunctionContent(false, out _);
                     } else {
                         throw new ParserException(this, "Class 开始关键字必须为[变量名称]或者[function]关键字", token);
                     }
-                } else if (token.Type == TokenType.Function || token.Type == TokenType.Sharp) {
+                } else if (token.Type == TokenType.Function) {
                     UndoToken();
-                    funcIndex = ParseFunctionContent(true, ref functionName);
+                    funcIndex = ParseFunctionContent(true, out var functionName);
                     nameIndex = GetConstString(functionName);
                 } else {
                     throw new ParserException(this, "Class 开始关键字必须为[变量名称]或者[function]关键字", token);
                 }
-                functions.Add(nameIndex << 32 | funcIndex);
+                functions.Add(new TypeFunction() { nameIndex = nameIndex, funcIndex = funcIndex, async = isAsync ? 1 : 0 });
             }
             ReadRightBrace();
+            var funs = new List<long>();
+            if (async) {
+                foreach (var func in functions) {
+                    funs.Add((func.nameIndex << 32) | (func.funcIndex << 1) | func.async);
+                }
+            } else {
+                foreach (var func in functions) {
+                    funs.Add((func.nameIndex << 32) | (func.funcIndex));
+                }
+            }
             var index = Classes.Count;
             Classes.Add(new ScriptClassData() {
                 name = GetConstString(className),
                 parent = parent.Length == 0 ? -1 : GetConstString(parent),
-                functions = functions.ToArray(),
+                functions = funs.ToArray(),
             });
             return index;
         }
         /// <summary> 解析函数（全局函数或类函数） </summary>
         void ParseFunction() {
             UndoToken();
-            var functionName = "";
-            var index = ParseFunctionContent(true, ref functionName);
+            var index = ParseFunctionContent(true, out var functionName);
             var sourceLine = PeekToken().SourceLine;
             AddScriptInstruction(Opcode.NewFunction, index, sourceLine);
             if (m_scriptExecutable.Block == ExecutableBlock.Context) {
@@ -581,9 +682,9 @@ namespace Scorpio.Compile.Compiler {
         /// <param name="needKeyword">是否需要function,#关键字</param>
         /// <param name="functionName">返回函数的名字</param>
         /// <returns></returns>
-        int ParseFunctionContent(bool needKeyword, ref string functionName) {
+        int ParseFunctionContent(bool needKeyword, out string functionName) {
             var token = ReadToken();
-            if (token.Type != TokenType.Function && token.Type != TokenType.Sharp) {
+            if (token.Type != TokenType.Function) {
                 if (needKeyword) {
                     throw new ParserException(this, "Function declaration must start with the 'function' or '#' keyword.", token);
                 } else {
@@ -675,10 +776,44 @@ namespace Scorpio.Compile.Compiler {
             PushObject(GetObject());
             AddScriptInstructionWithoutValue(Opcode.Throw, line);
         }
-        
-        
-        
-        
+        /// <summary> await </summary>
+        private void ParseAwait() {
+            PushObject(GetObject());
+            AddScriptInstructionWithoutValue(Opcode.Await);
+        }
+        /// <summary> async </summary>
+        private void ParseAsync() {
+            var index = ParseFunctionContent(true, out var functionName);
+            var sourceLine = PeekToken().SourceLine;
+            AddScriptInstruction(Opcode.NewAsyncFunction, index, sourceLine);
+            if (m_scriptExecutable.Block == ExecutableBlock.Context) {
+                AddScriptInstruction(Opcode.StoreGlobalString, GetConstString(functionName), sourceLine);
+            } else {
+                AddScriptInstruction(Opcode.StoreLocal, m_scriptExecutable.AddIndex(functionName), sourceLine);
+            }
+        }
+        #endregion
+
+
+        bool IsConstMember(CodeObject obj, out Stack<CodeMemberString> stack, out string memberName) {
+            stack = new Stack<CodeMemberString>();
+            memberName = "";
+            if (!(obj is CodeMemberString)) { return false; }
+            var memberString = obj as CodeMemberString;
+            memberName = memberString.key;
+            while (true) {
+                stack.Push(memberString);
+                if (memberString.Parent == null) {
+                    break;
+                }
+                memberString = memberString.Parent as CodeMemberString;
+                if (memberString == null) {
+                    return false;
+                }
+                memberName = memberString.key + "." + memberName;
+            }
+            return true;
+        }
         /// <summary> 压入一个值 </summary>
         void PushObject(CodeObject obj) {
             switch (obj) {
@@ -694,6 +829,8 @@ namespace Scorpio.Compile.Compiler {
                         AddScriptInstruction(Opcode.LoadConstLong, GetConstLong((long)value), obj.Line);
                     } else if (value is string) {
                         AddScriptInstruction(Opcode.LoadConstString, GetConstString((string)value), obj.Line);
+                    } else {
+                        throw new ParserException(this, "未知的常量 " + value.GetType() + ":" + value);
                     }
                     break;
                 }
@@ -704,19 +841,54 @@ namespace Scorpio.Compile.Compiler {
                         } else if (obj is CodeMemberInternal) {
                             AddScriptInstruction(Opcode.LoadInternal, member.index, obj.Line);
                         } else if (obj is CodeMemberString) {
-                            if ((obj as CodeMemberString).key == "base") {
+                            if ((obj as CodeMemberString).key == ScriptConstValue.Base) {
                                 AddScriptInstructionWithoutValue(Opcode.LoadBase, obj.Line);
                             } else {
-                                AddScriptInstruction(Opcode.LoadGlobalString, GetConstString(member.key), obj.Line);
+                                var constValue = compileOption.scriptConst.Get(member.key, out var contains);
+                                if (contains) {
+                                    if (constValue is ScriptConst) {
+                                        throw new ParserException(this, "常量不是基础变量:" + member.key);
+                                    } else {
+                                        PushObject(new CodeNativeObject(constValue, 0));
+                                    }
+                                } else {
+                                    AddScriptInstruction(Opcode.LoadGlobalString, GetConstString(member.key), obj.Line);
+                                }
                             }
                         }
                     } else {
+                        if (IsConstMember(member, out var stack, out _)) {
+                            var constValue = compileOption.scriptConst.Get(stack.Pop().key, out bool contains);
+                            if (contains) {
+                                while (stack.Count > 0) {
+                                    if (constValue is ScriptConst) {
+                                        constValue = (constValue as ScriptConst).Get(stack.Pop().key, out contains);
+                                    } else {
+                                        throw new ParserException(this, "常量已经是基础变量,不能再往下取值:" + member.key);
+                                    }
+                                }
+                                if (contains == false) {
+                                    throw new ParserException(this, "未知的常量:" + member.key);
+                                } else if (constValue is ScriptConst) {
+                                    throw new ParserException(this, "常量不是基础变量:" + member.key);
+                                } else {
+                                    PushObject(new CodeNativeObject(constValue, 0));
+                                    return;
+                                }
+                            }
+                        }
                         PushObject(member.Parent);
                         var nullTo = member.nullTo ? AddScriptInstruction(Opcode.NullTo, 0) : null;
                         if (obj is CodeMemberIndex) {
                             AddScriptInstruction(Opcode.LoadValue, member.index, obj.Line);
                         } else if (obj is CodeMemberString) {
                             AddScriptInstruction(Opcode.LoadValueString, GetConstString(member.key), obj.Line);
+                            if (IsConstMember(member, out stack, out string memberName)) {
+                                if (compileOption.IsStaticVariable(memberName)) {
+                                    AddScriptInstruction(Opcode.LoadConstString, GetConstString(memberName));
+                                    AddScriptInstruction(Opcode.ToGlobal, stack.Count + 1);
+                                }
+                            }
                         } else if (obj is CodeMemberObject) {
                             PushObject(member.codeKey);
                             AddScriptInstructionWithoutValue(Opcode.LoadValueObject, obj.Line);
@@ -748,19 +920,19 @@ namespace Scorpio.Compile.Compiler {
                     break;
                 }
                 case CodeFunction func: {
-                    if (func.lambada) {
-                        AddScriptInstruction(Opcode.NewLambadaFunction, func.func, obj.Line);
+                    if (func.async) {
+                        AddScriptInstruction(func.lambda ? Opcode.NewAsyncLambdaFunction : Opcode.NewAsyncFunction, func.func, obj.Line);
                     } else {
-                        AddScriptInstruction(Opcode.NewFunction, func.func, obj.Line);
+                        AddScriptInstruction(func.lambda ? Opcode.NewLambdaFunction : Opcode.NewFunction, func.func, obj.Line);
                     }
                     break;
                 }
                 case CodeCallFunction codeCallFunction: {
-                    if (ignoreFunctions != null) {
+                    {
                         var member = codeCallFunction.Member as CodeMemberString;
-                        if (member != null && member.Parent == null && System.Array.Exists(ignoreFunctions, (func) => func == member.key)) {
+                        if (member != null && member.Parent == null && compileOption.IsIgnoreFunction(member.key)) {
                             PushObject(new CodeNativeObject(null, -1));
-                            break;
+                            return;
                         }
                     }
                     {
@@ -774,13 +946,19 @@ namespace Scorpio.Compile.Compiler {
                         var isBase = false;                                     //base调用
                         if (isCallVi) {
                             PushObject(member.Parent);
-                            isBase = (member.Parent as CodeMemberString)?.key == "base";
+                            isBase = (member.Parent as CodeMemberString)?.key == ScriptConstValue.Base;
                             AddScriptInstructionWithoutValue(Opcode.CopyStackTop);
                             var memberNullTo = member.nullTo ? AddScriptInstruction(Opcode.NullTo, 0) : null;
                             if (member is CodeMemberIndex) {
                                 AddScriptInstruction(Opcode.LoadValue, member.index, obj.Line);
                             } else if (member is CodeMemberString) {
                                 AddScriptInstruction(Opcode.LoadValueString, GetConstString(member.key), obj.Line);
+                                if (IsConstMember(member, out var stack, out var memberName)) {
+                                    if (compileOption.IsStaticFunction(memberName)) {
+                                        AddScriptInstruction(Opcode.LoadConstString, GetConstString(memberName));
+                                        AddScriptInstruction(Opcode.ToGlobalFunction, stack.Count + 2);
+                                    }
+                                }
                             } else if (member is CodeMemberObject) {
                                 PushObject(member.codeKey);
                                 AddScriptInstructionWithoutValue(Opcode.LoadValueObject, obj.Line);
@@ -814,11 +992,9 @@ namespace Scorpio.Compile.Compiler {
                         }
                         if (codeCallFunction.Variables != null) {
                             foreach (var variable in codeCallFunction.Variables.Variables) {
-                                if (variable.key is string) {
-                                    AddScriptInstructionWithoutValue(Opcode.CopyStackTop, obj.line);
-                                    PushObject(variable.value);
-                                    AddScriptInstruction(Opcode.StoreValueString, GetConstString(variable.key.ToString()), obj.Line);
-                                }
+                                AddScriptInstructionWithoutValue(Opcode.CopyStackTop, obj.line);
+                                PushObject(variable.value);
+                                AddScriptInstruction(Opcode.StoreValueString, GetConstString(variable.key.ToString()), obj.Line);
                             }
                         }
                         if (isCallVi) {
@@ -834,7 +1010,7 @@ namespace Scorpio.Compile.Compiler {
                     break;
                 }
                 case CodeClass cl: {
-                    AddScriptInstruction(Opcode.NewType, cl.index, obj.Line);
+                    AddScriptInstruction(cl.async ? Opcode.NewAsyncType : Opcode.NewType, cl.index, obj.Line);
                     break;
                 }
                 case CodeArray array: {
@@ -845,7 +1021,7 @@ namespace Scorpio.Compile.Compiler {
                     break;
                 }
                 case CodeMap map: {
-                    AddScriptInstructionWithoutValue(Opcode.NewMap);
+                    AddScriptInstruction(Opcode.NewMap, map.onlyString ? 1 : 0);
                     foreach (var ele in map.Variables) {
                         AddScriptInstructionWithoutValue(Opcode.CopyStackTop);
                         if (ele.key is double) {
@@ -865,35 +1041,11 @@ namespace Scorpio.Compile.Compiler {
                         if (ele.key is string) {
                             AddScriptInstruction(Opcode.StoreValueString, GetConstString(ele.key.ToString()));
                         } else {
-                            AddScriptInstructionWithoutValue(Opcode.StoreValueObjectAssign);
-                            AddScriptInstructionWithoutValue(Opcode.Pop);
+                            AddScriptInstructionWithoutValue(Opcode.StoreValueObject);
+                            //AddScriptInstructionWithoutValue(Opcode.StoreValueObjectAssign);
+                            //AddScriptInstructionWithoutValue(Opcode.Pop);
                         }
                     }
-                    //foreach (var ele in map.Variables) {
-                    //    if (ele.value == null) {
-                    //        AddScriptInstructionWithoutValue(Opcode.LoadConstNull, obj.Line);
-                    //    } else {
-                    //        PushObject(ele.value);
-                    //    }
-                    //}
-                    //var hadObjectKey = false;
-                    //foreach (var ele in map.Variables) {
-                    //    if (ele.key is string) {
-                    //        AddScriptInstruction(Opcode.LoadConstString, GetConstString(ele.key.ToString()), obj.Line);
-                    //    } else if (ele.key is double) {
-                    //        hadObjectKey = true;
-                    //        AddScriptInstruction(Opcode.LoadConstDouble, GetConstDouble((double)ele.key), obj.Line);
-                    //    } else if (ele.key is long) {
-                    //        hadObjectKey = true;
-                    //        AddScriptInstruction(Opcode.LoadConstLong, GetConstLong((long)ele.key), obj.Line);
-                    //    } else if (ele.key is bool) {
-                    //        hadObjectKey = true;
-                    //        AddScriptInstructionWithoutValue(((bool)ele.key) ? Opcode.LoadConstTrue : Opcode.LoadConstFalse, obj.Line);
-                    //    } else {
-                    //        throw new ParserException(this, "未知的map key 类型 : " + ele.key.GetType());
-                    //    }
-                    //}
-                    //AddScriptInstruction(hadObjectKey ? Opcode.NewMapObject : Opcode.NewMap, map.Variables.Count, obj.Line);
                     break;
                 }
                 case CodeTernary ternary: {
@@ -917,6 +1069,16 @@ namespace Scorpio.Compile.Compiler {
                     PushAssign(assign);
                     break;
                 }
+                case CodeMultipleReturn multipleReturn: {
+                    PushObject(multipleReturn.Value);
+                    foreach (var key in multipleReturn.Returns) {
+                        AddScriptInstructionWithoutValue(Opcode.CopyStackTop);
+                        AddScriptInstruction(Opcode.LoadValueString, GetConstString(key));
+                        AddScriptInstruction(Opcode.StoreLocal, m_scriptExecutable.GetIndex(key));
+                    }
+                    AddScriptInstructionWithoutValue(Opcode.Pop);
+                    break;
+                }
                 default: throw new ParserException(this, "不支持的语法 : " + obj);
             }
             if (obj.Not) {
@@ -925,17 +1087,6 @@ namespace Scorpio.Compile.Compiler {
                 AddScriptInstructionWithoutValue(Opcode.FlagMinus, obj.Line);
             } else if (obj.Negative) {
                 AddScriptInstructionWithoutValue(Opcode.FlagNegative, obj.Line);
-            }
-        }
-        CodeObject IsVariableFunction(CodeObject member) {
-            while (true) {
-                if (member is CodeMember) {
-                    return (member as CodeMember).Parent;
-                } else if (member is CodeCallFunction) {
-                    member = (member as CodeCallFunction).Member;
-                } else {
-                    return null;
-                }
             }
         }
         //压入一个无返回值的赋值公式
@@ -1132,20 +1283,25 @@ namespace Scorpio.Compile.Compiler {
                     }
                     break;
                 }
-                case TokenType.Function:
-                case TokenType.Sharp: {
+                case TokenType.Function: {
                     UndoToken();
-                    var functionName = "";
-                    ret = new CodeFunction(ParseFunctionContent(true, ref functionName), token.SourceLine);
+                    ret = new CodeFunction(ParseFunctionContent(true, out _), token.SourceLine);
                     break;
                 }
                 case TokenType.Class: {
-                    var className = "";
-                    ret = new CodeClass(ParseClassContent(ref className), token.SourceLine);
+                    ret = new CodeClass(ParseClassContent(out _, out var async), async, token.SourceLine);
                     break;
                 }
                 case TokenType.LeftPar: {
-                    ret = GetRegionOrFunction();
+                    ret = GetRegionOrLambda(false);
+                    break;
+                }
+                case TokenType.Async: {
+                    if (PeekToken().Type == TokenType.LeftPar) {
+                        ret = GetRegionOrLambda(true);
+                    } else {
+                        ret = new CodeFunction(ParseFunctionContent(true, out _), token.SourceLine) { async = true };
+                    }
                     break;
                 }
                 case TokenType.Null:
@@ -1162,7 +1318,12 @@ namespace Scorpio.Compile.Compiler {
                 }
                 case TokenType.LeftBrace: {
                     UndoToken();
-                    ret = GetMap();
+                    ret = GetMap(false);
+                    break;
+                }
+                case TokenType.LeftBraceAt: {
+                    UndoToken();
+                    ret = GetMap(true);
                     break;
                 }
                 default: throw new ParserException(this, "Object起始关键字错误 ", token);
@@ -1253,7 +1414,7 @@ namespace Scorpio.Compile.Compiler {
             var ret = GetCallFunction(parent);
             ret.nullTo = nullTo;
             if (PeekToken().Type == TokenType.LeftBrace) {
-                ret.Variables = GetMap();
+                ret.Variables = GetMap(true);
             }
             return ret;
         }
@@ -1263,6 +1424,8 @@ namespace Scorpio.Compile.Compiler {
             var paramters = new List<CodeFunctionParameter>();
             var token = PeekToken();
             while (token.Type != TokenType.RightPar) {
+                if (PeekToken().Type == TokenType.RightPar)
+                    break;
                 var obj = GetObject();
                 token = PeekToken();
                 var spread = false;
@@ -1282,7 +1445,8 @@ namespace Scorpio.Compile.Compiler {
             ReadRightParenthesis();
             return new CodeCallFunction(member, paramters, token.SourceLine);
         }
-        CodeObject GetRegionOrFunction() {
+        //返回块内容或者Lambda函数
+        CodeObject GetRegionOrLambda(bool async) {
             UndoToken();
             var index = m_indexToken;
             ReadLeftParenthesis();
@@ -1296,14 +1460,15 @@ namespace Scorpio.Compile.Compiler {
             }
             if (PeekToken().Type == TokenType.Lambda) {
                 m_indexToken = index;
-                var functionName = "";
-                return new CodeFunction(ParseFunctionContent(false, ref functionName), true, token.SourceLine);
-            } else {
+                return new CodeFunction(ParseFunctionContent(false, out _), token.SourceLine) { lambda = true, async = async };
+            } else if (!async) {
                 m_indexToken = index;
                 ReadLeftParenthesis();
                 var ret = new CodeRegion(GetObject(), token.SourceLine);
                 ReadRightParenthesis();
                 return ret;
+            } else {
+                throw new ParserException(this, "async 后必须是函数", token);
             }
         }
         //返回数组
@@ -1320,16 +1485,21 @@ namespace Scorpio.Compile.Compiler {
                     ReadToken();
                 } else if (token.Type == TokenType.RightBracket) {
                     break;
-                } else
+                } else {
                     throw new ParserException(this, "Comma ',' or SemiColon ';' or right parenthesis ']' expected in array object.", token);
+                }
             }
             ReadRightBracket();
             return ret;
         }
         //返回map数据
-        CodeMap GetMap() {
-            var ret = new CodeMap(GetSourceLine());
-            ReadLeftBrace();
+        CodeMap GetMap(bool onlyString) {
+            var ret = new CodeMap(GetSourceLine(), onlyString);
+            if (PeekToken().Type == TokenType.LeftBraceAt) {
+                ReadToken();
+            } else {
+                ReadLeftBrace();
+            }
             while (PeekToken().Type != TokenType.RightBrace) {
                 var token = ReadToken();
                 switch (token.Type) {
@@ -1340,6 +1510,11 @@ namespace Scorpio.Compile.Compiler {
                     case TokenType.String:
                     case TokenType.Number:
                     case TokenType.Boolean: {
+                        if (onlyString) {
+                            if (token.Type != TokenType.Identifier && token.Type != TokenType.String) {
+                                throw new ParserException(this, "当前Map只支持Key为String类型", token);
+                            }
+                        }
                         var next = ReadToken();
                         if (next.Type == TokenType.Assign || next.Type == TokenType.Colon) {
                             ret.Variables.Add(new CodeMap.MapVariable(token.Lexeme, GetObject()));
@@ -1348,20 +1523,29 @@ namespace Scorpio.Compile.Compiler {
                         } else if ((token.Type == TokenType.Identifier || token.Type == TokenType.String) && next.Type == TokenType.LeftPar) {
                             UndoToken();
                             UndoToken();
-                            string functionName = "";
-                            var index = ParseFunctionContent(false, ref functionName);
+                            var index = ParseFunctionContent(false, out var functionName);
                             ret.Variables.Add(new CodeMap.MapVariable(functionName, new CodeFunction(index, token.SourceLine)));
                         } else {
                             throw new ParserException(this, "Map变量赋值符号为[=]或者[:]", token);
                         }
                         continue;
                     }
-                    case TokenType.Function:
-                    case TokenType.Sharp: {
+                    case TokenType.Function: {
                         UndoToken();
-                        string functionName = "";
-                        var index = ParseFunctionContent(true, ref functionName);
+                        var index = ParseFunctionContent(true, out var functionName);
                         ret.Variables.Add(new CodeMap.MapVariable(functionName, new CodeFunction(index, token.SourceLine)));
+                        break;
+                    }
+                    case TokenType.Async: {
+                        if (PeekToken().Type == TokenType.Function) {
+                            var index = ParseFunctionContent(true, out var functionName);
+                            ret.Variables.Add(new CodeMap.MapVariable(functionName, new CodeFunction(index, token.SourceLine) { async = true }));
+                        } else if (PeekToken().Type == TokenType.Identifier || PeekToken().Type == TokenType.String) {
+                            var index = ParseFunctionContent(false, out var functionName);
+                            ret.Variables.Add(new CodeMap.MapVariable(functionName, new CodeFunction(index, token.SourceLine) { async = true }));
+                        } else {
+                            throw new ParserException(this, "Map开始关键字必须为[变量名称]或者[function]关键字", token);
+                        }
                         break;
                     }
                     default: throw new ParserException(this, "Map开始关键字必须为[变量名称]或者[function]关键字", token);
@@ -1370,7 +1554,5 @@ namespace Scorpio.Compile.Compiler {
             ReadRightBrace();
             return ret;
         }
-        
-
     }
 }

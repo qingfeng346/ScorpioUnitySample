@@ -1,4 +1,5 @@
 using System;
+using Scorpio.Exception;
 namespace Scorpio.Library {
     public partial class LibraryMath {
         public const double PI = 3.1415926535897931;            //PI 三角函数
@@ -6,7 +7,7 @@ namespace Scorpio.Library {
         public const double Rad2Deg = 57.29578;                 //弧度转角度
         public const double Epsilon = 1.401298E-45;             //一个很小的浮点数
         public static void Load(Script script) {
-            var map = new ScriptMap(script);
+            var map = new ScriptMapString(script);
             map.SetValue("PI", new ScriptValue(PI));
             map.SetValue("Deg2Rad", new ScriptValue(Deg2Rad));              //角度转弧度 角度*此值=弧度
             map.SetValue("Rad2Deg", new ScriptValue(Rad2Deg));              //弧度转角度 弧度*此值=角度
@@ -42,8 +43,29 @@ namespace Scorpio.Library {
                 if (length == 0) return ScriptValue.Zero;
                 var min = args[0];
                 for (var i = 1; i < length; ++i) {
-                    if (args[i].Less(min)) {
-                        min = args[i];
+                    var arg = args[i];
+                    if (min.valueType == arg.valueType) {
+                        switch (min.valueType) {
+                            case ScriptValue.scriptValueType: {
+                                if (arg.scriptValue.Less(min)) {
+                                    min = arg;
+                                }
+                                break;
+                            }
+                            case ScriptValue.doubleValueType: {
+                                if (arg.doubleValue < min.doubleValue) {
+                                    min = arg;
+                                }
+                                break;
+                            }
+                            case ScriptValue.longValueType: {
+                                if (arg.longValue < min.longValue) {
+                                    min = arg;
+                                }
+                                break;
+                            }
+                            default: throw new ExecutionException($"【<】运算符不支持当前类型 : {min.ValueTypeName}");
+                        }
                     }
                 }
                 return min;
@@ -54,8 +76,29 @@ namespace Scorpio.Library {
                 if (length == 0) return ScriptValue.Zero;
                 var max = args[0];
                 for (var i = 1; i < length; ++i) {
-                    if (args[i].Greater(max)) {
-                        max = args[i];
+                    var arg = args[i];
+                    if (max.valueType == arg.valueType) {
+                        switch (max.valueType) {
+                            case ScriptValue.scriptValueType: {
+                                if (arg.scriptValue.Greater(max)) {
+                                    max = arg;
+                                }
+                                break;
+                            }
+                            case ScriptValue.doubleValueType: {
+                                if (arg.doubleValue > max.doubleValue) {
+                                    max = arg;
+                                }
+                                break;
+                            }
+                            case ScriptValue.longValueType: {
+                                if (arg.longValue > max.longValue) {
+                                    max = arg;
+                                }
+                                break;
+                            }
+                            default: throw new ExecutionException($"【>】运算符不支持当前类型 : {max.ValueTypeName}");
+                        }
                     }
                 }
                 return max;

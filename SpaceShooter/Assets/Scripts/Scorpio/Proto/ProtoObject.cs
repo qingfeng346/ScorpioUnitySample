@@ -3,12 +3,19 @@ namespace Scorpio.Proto {
     public class ProtoObject {
         public static ScriptType Load(Script script, ScriptType ret) {
             ret.SetValue("toString", script.CreateFunction(new toString()));
+            ret.SetValue("getHashCode", script.CreateFunction(new getHashCode()));
             ret.SetValue("instanceOf", script.CreateFunction(new instanceOf(script)));
+            ret.SetValue("referenceEquals", script.CreateFunction(new referenceEquals()));
             return ret;
         }
         private class toString : ScorpioHandle {
             public ScriptValue Call(ScriptValue thisObject, ScriptValue[] args, int length) {
                 return new ScriptValue(thisObject.ToString());
+            }
+        }
+        private class getHashCode : ScorpioHandle {
+            public ScriptValue Call(ScriptValue thisObject, ScriptValue[] args, int length) {
+                return new ScriptValue((double)thisObject.GetHashCode());
             }
         }
         private class instanceOf : ScorpioHandle {
@@ -38,7 +45,7 @@ namespace Scorpio.Proto {
                         } else if (thisObject.scriptValue is ScriptFunction) {
                             type = m_Script.TypeFunctionValue;
                         } else if (thisObject.scriptValue is ScriptInstance) {
-                            type = (thisObject.scriptValue as ScriptInstance).Prototype;
+                            type = new ScriptValue((thisObject.scriptValue as ScriptInstance).Prototype);
                         } else if (thisObject.scriptValue is ScriptType) {
                             type = thisObject;
                         } else {
@@ -57,7 +64,7 @@ namespace Scorpio.Proto {
                         if (scriptType.Equals(parentType)) {
                             return ScriptValue.True;
                         }
-                        if ((scriptType = scriptType.Prototype.Get<ScriptType>()) == null) {
+                        if ((scriptType = scriptType.Prototype) == null) {
                             return ScriptValue.False;
                         }
                     }
@@ -66,6 +73,11 @@ namespace Scorpio.Proto {
                 } else {
                     return ScriptValue.False;
                 }
+            }
+        }
+        private class referenceEquals : ScorpioHandle {
+            public ScriptValue Call(ScriptValue thisObject, ScriptValue[] args, int length) {
+                return object.ReferenceEquals(args[0].Value, args[1].Value) ? ScriptValue.True : ScriptValue.False;
             }
         }
     }

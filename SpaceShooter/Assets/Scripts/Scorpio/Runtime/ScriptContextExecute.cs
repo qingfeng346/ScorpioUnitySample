@@ -1,18 +1,33 @@
+using System.Collections;
 using Scorpio.Exception;
 using Scorpio.Function;
 using Scorpio.Instruction;
 using Scorpio.Tools;
 namespace Scorpio.Runtime {
-
     //执行命令
     //注意事项:
     //所有调用另一个程序集的地方 都要new一个新的 否则递归调用会相互影响
     public partial class ScriptContext {
+#if EXECUTE_COROUTINE && EXECUTE_BASE
+        public IEnumerator ExecuteCoroutine(ScriptValue thisObject, ScriptValue[] args, int length, InternalValue[] internalValues, ScriptType baseType) {
+#elif EXECUTE_COROUTINE
+        public IEnumerator ExecuteCoroutine(ScriptValue thisObject, ScriptValue[] args, int length, InternalValue[] internalValues) {
+#elif EXECUTE_BASE
+        public ScriptValue Execute(ScriptValue thisObject, ScriptValue[] args, int length, InternalValue[] internalValues, ScriptType baseType) {
+#else
         public ScriptValue Execute(ScriptValue thisObject, ScriptValue[] args, int length, InternalValue[] internalValues) {
+#endif
+
 #if SCORPIO_DEBUG
-            //Logger.debug($"执行命令 =>\n{m_FunctionData.ToString(constDouble, constLong, constString)}");
+            //System.Console.WriteLine($"执行命令 =>\n{m_FunctionData.ToString(constDouble, constLong, constString)}");
             if (VariableValueIndex < 0 || VariableValueIndex >= ValueCacheLength) {
-                throw new ExecutionException("Stack overflow : " + VariableValueIndex);
+                throw new ExecutionException($"Stack overflow : {VariableValueIndex}");
+            }
+#endif
+#if SCORPIO_THREAD
+            var currentThread = System.Threading.Thread.CurrentThread;
+            if (currentThread.ManagedThreadId != m_script.MainThreadId) {
+                throw new ExecutionException($"only run script on mainthread : {m_script.MainThreadId} - {currentThread.ManagedThreadId}({currentThread.Name})");
             }
 #endif
             var variableObjects = VariableValues[VariableValueIndex]; //局部变量
@@ -33,7 +48,9 @@ namespace Scorpio.Runtime {
                 }
             }
             var stackIndex = -1; //堆栈索引
+#if !EXECUTE_COROUTINE
             var tryIndex = -1; //try索引
+#endif
             var parameterCount = m_FunctionData.parameterCount; //参数数量
             //是否是变长参数
             if (m_FunctionData.param) {
@@ -58,8 +75,10 @@ namespace Scorpio.Runtime {
             int tempIndex; //临时存储
             ScriptInstruction instruction = null;
             try {
+#if !EXECUTE_COROUTINE
             KeepOn: 
                 try {
+#endif
                     while (iInstruction < iInstructionCount) {
                         instruction = m_scriptInstructions[iInstruction++];
                         var opvalue = instruction.opvalue;
@@ -236,7 +255,33 @@ namespace Scorpio.Runtime {
                                         continue;
                                     }
                                     case Opcode.LoadBase: {
-                                        stackObjects[++stackIndex] = thisObject.Get<ScriptInstance>().Prototype.Get<ScriptType>().Prototype;
+                                        #if EXECUTE_BASE
+                                        stackObjects[++stackIndex] = new ScriptValue(baseType.Prototype);
+                                        #else
+                                        stackObjects[++stackIndex] = new ScriptValue(thisObject.Get<ScriptInstance>().Prototype.Prototype);
+                                        #endif
+                                        continue;
+                                    }
+                                    case Opcode.ToGlobal: {
+                                        tempIndex = m_global.GetIndex(stackObjects[stackIndex--].stringValue);
+                                        m_global.SetValueByIndex(tempIndex, stackObjects[stackIndex]);
+                                        instruction.SetOpcode(Opcode.LoadGlobal, tempIndex);
+                                        for (var i = 0; i < opvalue; ++i) {
+                                            m_scriptInstructions[iInstruction - i - 2].SetOpcode(Opcode.Nop);
+                                        }
+                                        continue;
+                                    }
+                                    case Opcode.ToGlobalFunction: {
+                                        tempIndex = m_global.GetIndex(stackObjects[stackIndex--].stringValue);
+                                        m_global.SetValueByIndex(tempIndex, stackObjects[stackIndex]);
+                                        instruction.SetOpcode(Opcode.LoadGlobal, tempIndex);
+                                        for (var i = 0; i < opvalue; ++i) {
+                                            if (i == 0) {
+                                                m_scriptInstructions[iInstruction - i - 2].SetOpcode(Opcode.LoadConstNull);
+                                            } else {
+                                                m_scriptInstructions[iInstruction - i - 2].SetOpcode(Opcode.Nop);
+                                            }
+                                        }
                                         continue;
                                     }
                                     default: throw new ExecutionException("unknown opcode : " + opcode);
@@ -339,7 +384,7 @@ namespace Scorpio.Runtime {
                                                 stackObjects[stackIndex - 2].SetValue(stackObjects[stackIndex - 1].objectValue, stackObjects[stackIndex]);
                                                 break;
                                             default:
-                                                throw new ExecutionException($"不支持当前类型设置变量 : {stackObjects[stackIndex - 1].ValueTypeName}");
+                                                throw new ExecutionException($"类型[{stackObjects[stackIndex-2].ValueTypeName}]不支持设置变量:{stackObjects[stackIndex-1].ValueTypeName}");
                                         }
                                         stackObjects[stackIndex -= 2] = stackObjects[tempIndex];
                                         continue;
@@ -456,7 +501,7 @@ namespace Scorpio.Runtime {
                                                 stackObjects[stackIndex - 2].SetValue(stackObjects[stackIndex - 1].objectValue, stackObjects[stackIndex]);
                                                 break;
                                             default:
-                                                throw new ExecutionException($"不支持当前类型设置变量 : {stackObjects[stackIndex - 1].ValueTypeName}");
+                                                throw new ExecutionException($"类型[{stackObjects[stackIndex-2].ValueTypeName}]不支持设置变量:{stackObjects[stackIndex-1].ValueTypeName}");
                                         }
                                         stackIndex -= 3;
                                         continue;
@@ -833,6 +878,134 @@ namespace Scorpio.Runtime {
                                 }
                             case OpcodeType.Compare:
                                 switch (opcode) {
+                                    case Opcode.Equal: {
+                                        tempIndex = stackIndex - 1;
+                                        tempValueType = stackObjects[tempIndex].valueType;
+                                        switch (tempValueType) {
+                                            case ScriptValue.doubleValueType: {
+                                                switch (stackObjects[stackIndex].valueType) {
+                                                    case ScriptValue.doubleValueType:
+                                                        stackObjects[tempIndex].valueType = stackObjects[tempIndex].doubleValue == stackObjects[stackIndex].doubleValue ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                        break;
+                                                    case ScriptValue.longValueType:
+                                                        stackObjects[tempIndex].valueType = stackObjects[tempIndex].doubleValue == stackObjects[stackIndex].longValue ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                        break;
+                                                    default:
+                                                        stackObjects[tempIndex].valueType = ScriptValue.falseValueType;
+                                                        break;
+                                                }
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.stringValueType: {
+                                                if (stackObjects[stackIndex].valueType == ScriptValue.stringValueType) {
+                                                    stackObjects[tempIndex].valueType = stackObjects[tempIndex].stringValue == stackObjects[stackIndex].stringValue ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                } else {
+                                                    stackObjects[tempIndex].valueType = ScriptValue.falseValueType;
+                                                }
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.trueValueType:
+                                            case ScriptValue.nullValueType:
+                                            case ScriptValue.falseValueType: {
+                                                stackObjects[tempIndex].valueType = tempValueType == stackObjects[stackIndex].valueType ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.longValueType: {
+                                                switch (stackObjects[stackIndex].valueType) {
+                                                    case ScriptValue.longValueType:
+                                                        stackObjects[tempIndex].valueType = stackObjects[tempIndex].longValue == stackObjects[stackIndex].longValue ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                        break;
+                                                    case ScriptValue.doubleValueType:
+                                                        stackObjects[tempIndex].valueType = stackObjects[tempIndex].longValue == stackObjects[stackIndex].doubleValue ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                        break;
+                                                    default:
+                                                        stackObjects[tempIndex].valueType = ScriptValue.falseValueType;
+                                                        break;
+                                                }
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.scriptValueType: {
+                                                stackObjects[tempIndex].valueType = stackObjects[tempIndex].scriptValue.Equals(stackObjects[stackIndex]) ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.objectValueType: {
+                                                stackObjects[tempIndex].valueType = stackObjects[tempIndex].objectValue.Equals(stackObjects[stackIndex].Value) ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            default:
+                                                throw new ExecutionException($"【==】未知的数据类型 {stackObjects[tempIndex].ValueTypeName}");
+                                        }
+                                    }
+                                    case Opcode.NotEqual: {
+                                        tempIndex = stackIndex - 1;
+                                        tempValueType = stackObjects[tempIndex].valueType;
+                                        switch (tempValueType) {
+                                            case ScriptValue.doubleValueType: {
+                                                switch (stackObjects[stackIndex].valueType) {
+                                                    case ScriptValue.doubleValueType:
+                                                        stackObjects[tempIndex].valueType = stackObjects[tempIndex].doubleValue == stackObjects[stackIndex].doubleValue ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                        break;
+                                                    case ScriptValue.longValueType:
+                                                        stackObjects[tempIndex].valueType = stackObjects[tempIndex].doubleValue == stackObjects[stackIndex].longValue ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                        break;
+                                                    default:
+                                                        stackObjects[tempIndex].valueType = ScriptValue.trueValueType;
+                                                        break;
+                                                }
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.stringValueType: {
+                                                if (stackObjects[stackIndex].valueType == ScriptValue.stringValueType) {
+                                                    stackObjects[tempIndex].valueType = stackObjects[tempIndex].stringValue == stackObjects[stackIndex].stringValue ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                } else {
+                                                    stackObjects[tempIndex].valueType = ScriptValue.trueValueType;
+                                                }
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.trueValueType:
+                                            case ScriptValue.nullValueType:
+                                            case ScriptValue.falseValueType: {
+                                                stackObjects[tempIndex].valueType = tempValueType == stackObjects[stackIndex].valueType ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.longValueType: {
+                                                switch (stackObjects[stackIndex].valueType) {
+                                                    case ScriptValue.longValueType:
+                                                        stackObjects[tempIndex].valueType = stackObjects[tempIndex].longValue == stackObjects[stackIndex].longValue ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                        break;
+                                                    case ScriptValue.doubleValueType:
+                                                        stackObjects[tempIndex].valueType = stackObjects[tempIndex].longValue == stackObjects[stackIndex].doubleValue ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                        break;
+                                                    default:
+                                                        stackObjects[tempIndex].valueType = ScriptValue.trueValueType;
+                                                        break;
+                                                }
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.scriptValueType: {
+                                                stackObjects[tempIndex].valueType = stackObjects[tempIndex].scriptValue.Equals(stackObjects[stackIndex]) ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            case ScriptValue.objectValueType: {
+                                                stackObjects[tempIndex].valueType = stackObjects[tempIndex].objectValue.Equals(stackObjects[stackIndex].Value) ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                --stackIndex;
+                                                continue;
+                                            }
+                                            default:
+                                                throw new ExecutionException($"【!=】未知的数据类型 {stackObjects[tempIndex].ValueTypeName}");
+                                        }
+                                    }
                                     case Opcode.Less: {
                                         tempIndex = stackIndex - 1;
                                         switch (stackObjects[tempIndex].valueType) {
@@ -977,7 +1150,7 @@ namespace Scorpio.Runtime {
                                                 throw new ExecutionException($"【>=】运算符不支持当前类型 : {stackObjects[tempIndex].ValueTypeName}");
                                         }
                                     }
-                                    case Opcode.Equal: {
+                                    case Opcode.EqualReference: {
                                         tempIndex = stackIndex - 1;
                                         tempValueType = stackObjects[tempIndex].valueType;
                                         switch (tempValueType) {
@@ -998,7 +1171,7 @@ namespace Scorpio.Runtime {
                                             }
                                             case ScriptValue.stringValueType: {
                                                 if (stackObjects[stackIndex].valueType == ScriptValue.stringValueType) {
-                                                    stackObjects[tempIndex].valueType = stackObjects[tempIndex].stringValue == stackObjects[stackIndex].stringValue ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                    stackObjects[tempIndex].valueType = ReferenceEquals(stackObjects[tempIndex].stringValue, stackObjects[stackIndex].stringValue) ? ScriptValue.trueValueType : ScriptValue.falseValueType;
                                                 } else {
                                                     stackObjects[tempIndex].valueType = ScriptValue.falseValueType;
                                                 }
@@ -1028,7 +1201,7 @@ namespace Scorpio.Runtime {
                                                 continue;
                                             }
                                             case ScriptValue.scriptValueType: {
-                                                stackObjects[tempIndex].valueType = stackObjects[tempIndex].scriptValue.Equals(stackObjects[stackIndex]) ? ScriptValue.trueValueType : ScriptValue.falseValueType;
+                                                stackObjects[tempIndex].valueType = stackObjects[tempIndex].scriptValue.EqualReference(stackObjects[stackIndex]) ? ScriptValue.trueValueType : ScriptValue.falseValueType;
                                                 --stackIndex;
                                                 continue;
                                             }
@@ -1041,7 +1214,7 @@ namespace Scorpio.Runtime {
                                                 throw new ExecutionException($"【==】未知的数据类型 {stackObjects[tempIndex].ValueTypeName}");
                                         }
                                     }
-                                    case Opcode.NotEqual: {
+                                    case Opcode.NotEqualReference: {
                                         tempIndex = stackIndex - 1;
                                         tempValueType = stackObjects[tempIndex].valueType;
                                         switch (tempValueType) {
@@ -1062,7 +1235,7 @@ namespace Scorpio.Runtime {
                                             }
                                             case ScriptValue.stringValueType: {
                                                 if (stackObjects[stackIndex].valueType == ScriptValue.stringValueType) {
-                                                    stackObjects[tempIndex].valueType = stackObjects[tempIndex].stringValue == stackObjects[stackIndex].stringValue ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                    stackObjects[tempIndex].valueType = ReferenceEquals(stackObjects[tempIndex].stringValue, stackObjects[stackIndex].stringValue) ? ScriptValue.falseValueType : ScriptValue.trueValueType;
                                                 } else {
                                                     stackObjects[tempIndex].valueType = ScriptValue.trueValueType;
                                                 }
@@ -1092,7 +1265,7 @@ namespace Scorpio.Runtime {
                                                 continue;
                                             }
                                             case ScriptValue.scriptValueType: {
-                                                stackObjects[tempIndex].valueType = stackObjects[tempIndex].scriptValue.Equals(stackObjects[stackIndex]) ? ScriptValue.falseValueType : ScriptValue.trueValueType;
+                                                stackObjects[tempIndex].valueType = stackObjects[tempIndex].scriptValue.EqualReference(stackObjects[stackIndex]) ? ScriptValue.falseValueType : ScriptValue.trueValueType;
                                                 --stackIndex;
                                                 continue;
                                             }
@@ -1125,17 +1298,16 @@ namespace Scorpio.Runtime {
                                         for (var i = opvalue - 1; i >= 0; --i) {
                                             parameters[i] = stackObjects[stackIndex--];
                                         }
-                                        var func = stackObjects[stackIndex--];
-#if SCORPIO_DEBUG || SCORPIO_STACK
+                                        #if SCORPIO_DEBUG || SCORPIO_STACK
                                         m_script.PushStackInfo(m_Breviary, instruction.line);
                                         try {
-                                            stackObjects[++stackIndex] = func.Call(ScriptValue.Null, parameters, opvalue);
+                                            stackObjects[stackIndex] = stackObjects[stackIndex].Call(ScriptValue.Null, parameters, opvalue);
                                         } finally {
                                             m_script.PopStackInfo();
                                         }
-#else
-                                        stackObjects[++stackIndex] = func.Call (ScriptValue.Null, parameters, opvalue);
-#endif
+                                        #else
+                                        stackObjects[stackIndex] = stackObjects[stackIndex].Call (ScriptValue.Null, parameters, opvalue);
+                                        #endif
                                         continue;
                                     }
                                     case Opcode.CallVi: {
@@ -1220,12 +1392,20 @@ namespace Scorpio.Runtime {
                                         }
                                     }
                                     case Opcode.RetNone: {
+                                        #if EXECUTE_COROUTINE
+                                        yield break;
+                                        #else
                                         --VariableValueIndex;
                                         return ScriptValue.Null;
+                                        #endif
                                     }
                                     case Opcode.Ret: {
+                                        #if EXECUTE_COROUTINE
+                                        yield break;
+                                        #else
                                         --VariableValueIndex;
                                         return stackObjects[stackIndex];
+                                        #endif
                                     }
                                     case Opcode.CallUnfold: {
                                         var value = constLong[opvalue]; //值 前8位为 参数个数  后56位标识 哪个参数需要展开
@@ -1316,6 +1496,7 @@ namespace Scorpio.Runtime {
                                         }
                                         continue;
                                     }
+                                    #if !EXECUTE_COROUTINE
                                     case Opcode.TryTo: {
                                         tryStack[++tryIndex] = opvalue;
                                         continue;
@@ -1325,6 +1506,7 @@ namespace Scorpio.Runtime {
                                         --tryIndex;
                                         continue;
                                     }
+                                    #endif
                                     case Opcode.Throw: {
                                         throw new ScriptException(stackObjects[stackIndex]);
                                     }
@@ -1332,18 +1514,18 @@ namespace Scorpio.Runtime {
                                         for (var i = opvalue - 1; i >= 0; --i) {
                                             parameters[i] = stackObjects[stackIndex--];
                                         }
-                                        var func = stackObjects[stackIndex--].Get<ScriptScriptFunction>(); //函数对象
+                                        var func = stackObjects[stackIndex--];              //函数对象
                                         var prototype = stackObjects[stackIndex--];
-#if SCORPIO_DEBUG || SCORPIO_STACK
+                                        #if SCORPIO_DEBUG || SCORPIO_STACK
                                         m_script.PushStackInfo(m_Breviary, instruction.line);
                                         try {
                                             stackObjects[++stackIndex] = func.Call(thisObject, parameters, opvalue, prototype.Get<ScriptType>());
                                         } finally {
                                             m_script.PopStackInfo();
                                         }
-#else
+                                        #else
                                         stackObjects[++stackIndex] = func.Call (thisObject, parameters, opvalue, prototype.Get<ScriptType>());
-#endif
+                                        #endif
                                         continue;
                                     }
                                     case Opcode.CallBaseUnfold: {
@@ -1370,27 +1552,42 @@ namespace Scorpio.Runtime {
                                             }
                                         }
                                         stackIndex -= funcParameterCount;
-                                        var func = stackObjects[stackIndex--].Get<ScriptScriptFunction>(); //函数对象
+                                        var func = stackObjects[stackIndex--]; //函数对象
                                         var prototype = stackObjects[stackIndex--];
-#if SCORPIO_DEBUG || SCORPIO_STACK
+                                        #if SCORPIO_DEBUG || SCORPIO_STACK
                                         m_script.PushStackInfo(m_Breviary, instruction.line);
                                         try {
                                             stackObjects[++stackIndex] = func.Call(thisObject, parameters, parameterIndex, prototype.Get<ScriptType>());
                                         } finally {
                                             m_script.PopStackInfo();
                                         }
-#else
+                                        #else
                                         stackObjects[++stackIndex] = func.Call (thisObject, parameters, parameterIndex, prototype.Get<ScriptType>());
-#endif
+                                        #endif
                                         continue;
                                     }
+                                    #if EXECUTE_COROUTINE
+                                    case Opcode.Await: {
+                                        yield return stackObjects[stackIndex--].Value;
+                                        continue;
+                                    }
+                                    #endif
                                     default: throw new ExecutionException("unknown opcode : " + opcode);
                                 }
                             case OpcodeType.New:
                                 switch (opcode) {
                                     case Opcode.NewMap: {
                                         stackObjects[++stackIndex].valueType = ScriptValue.scriptValueType;
-                                        stackObjects[stackIndex].scriptValue = new ScriptMap(m_script);
+                                        if (opvalue == 0) {
+                                            stackObjects[stackIndex].scriptValue = new ScriptMapObject(m_script);
+                                        } else {
+                                            stackObjects[stackIndex].scriptValue = new ScriptMapString(m_script);
+                                        }
+                                        continue;
+                                    }
+                                    case Opcode.NewMapString: {
+                                        stackObjects[++stackIndex].valueType = ScriptValue.scriptValueType;
+                                        stackObjects[stackIndex].scriptValue = new ScriptMapString(m_script);
                                         continue;
                                     }
                                     case Opcode.NewArray: {
@@ -1404,7 +1601,7 @@ namespace Scorpio.Runtime {
                                         continue;
                                     }
                                     case Opcode.NewMapObject: {
-                                        var map = new ScriptMap(m_script);
+                                        var map = new ScriptMapObject(m_script);
                                         for (var i = opvalue - 1; i >= 0; --i) {
                                             map.SetValue(stackObjects[stackIndex - i].Value, stackObjects[stackIndex - i - opvalue]);
                                         }
@@ -1425,10 +1622,10 @@ namespace Scorpio.Runtime {
                                         stackObjects[stackIndex].scriptValue = function;
                                         continue;
                                     }
-                                    case Opcode.NewLambadaFunction: {
+                                    case Opcode.NewLambdaFunction: {
                                         var functionData = constContexts[opvalue];
                                         var internals = functionData.m_FunctionData.internals;
-                                        var function = new ScriptScriptBindFunction(functionData, thisObject);
+                                        var function = new ScriptScriptLambdaFunction(functionData, thisObject);
                                         for (var i = 0; i < internals.Length; ++i) {
                                             var internalIndex = internals[i];
                                             function.SetInternal(internalIndex & 0xffff, internalObjects[internalIndex >> 16]);
@@ -1441,7 +1638,7 @@ namespace Scorpio.Runtime {
                                         var classData = constClasses[opvalue];
                                         var parentType = classData.parent >= 0 ? m_global.GetValue(constString[classData.parent]) : m_script.TypeObjectValue;
                                         var className = constString[classData.name];
-                                        var type = new ScriptType(className, parentType.valueType == ScriptValue.nullValueType ? m_script.TypeObjectValue : parentType);
+                                        var type = new ScriptType(className, parentType.Get<ScriptType>() ?? m_script.TypeObject);
                                         var functions = classData.functions;
                                         for (var j = 0; j < functions.Length; ++j) {
                                             var func = functions[j];
@@ -1458,14 +1655,78 @@ namespace Scorpio.Runtime {
                                         stackObjects[stackIndex].scriptValue = type;
                                         continue;
                                     }
+                                    case Opcode.NewAsyncFunction: {
+                                        var functionData = constContexts[opvalue];
+                                        var internals = functionData.m_FunctionData.internals;
+                                        var function = new ScriptScriptAsyncFunction(functionData);
+                                        for (var i = 0; i < internals.Length; ++i) {
+                                            var internalIndex = internals[i];
+                                            function.SetInternal(internalIndex & 0xffff, internalObjects[internalIndex >> 16]);
+                                        }
+                                        stackObjects[++stackIndex].valueType = ScriptValue.scriptValueType;
+                                        stackObjects[stackIndex].scriptValue = function;
+                                        continue;
+                                    }
+                                    case Opcode.NewAsyncLambdaFunction: {
+                                        var functionData = constContexts[opvalue];
+                                        var internals = functionData.m_FunctionData.internals;
+                                        var function = new ScriptScriptAsyncLambdaFunction(functionData, thisObject);
+                                        for (var i = 0; i < internals.Length; ++i) {
+                                            var internalIndex = internals[i];
+                                            function.SetInternal(internalIndex & 0xffff, internalObjects[internalIndex >> 16]);
+                                        }
+                                        stackObjects[++stackIndex].valueType = ScriptValue.scriptValueType;
+                                        stackObjects[stackIndex].scriptValue = function;
+                                        continue;
+                                    }
+                                    case Opcode.NewAsyncType: {
+                                        var classData = constClasses[opvalue];
+                                        var parentType = classData.parent >= 0 ? m_global.GetValue(constString[classData.parent]) : m_script.TypeObjectValue;
+                                        var className = constString[classData.name];
+                                        var type = new ScriptType(className, parentType.Get<ScriptType>() ?? m_script.TypeObject);
+                                        var functions = classData.functions;
+                                        for (var j = 0; j < functions.Length; ++j) {
+                                            var func = functions[j];
+                                            var functionData = constContexts[(func & 0xffffffff) >> 1];
+                                            var async = (func & 1) == 1;
+                                            var internals = functionData.m_FunctionData.internals;
+                                            if ((func & 1) == 1) {
+                                                var function = new ScriptScriptAsyncFunction(functionData);
+                                                for (var i = 0; i < internals.Length; ++i) {
+                                                    var internalIndex = internals[i];
+                                                    function.SetInternal(internalIndex & 0xffff, internalObjects[internalIndex >> 16]);
+                                                }
+                                                type.SetValue(constString[func >> 32], new ScriptValue(function));
+                                            } else {
+                                                var function = new ScriptScriptFunction(functionData);
+                                                for (var i = 0; i < internals.Length; ++i) {
+                                                    var internalIndex = internals[i];
+                                                    function.SetInternal(internalIndex & 0xffff, internalObjects[internalIndex >> 16]);
+                                                }
+                                                type.SetValue(constString[func >> 32], new ScriptValue(function));
+                                            }
+                                        }
+                                        stackObjects[++stackIndex].valueType = ScriptValue.scriptValueType;
+                                        stackObjects[stackIndex].scriptValue = type;
+                                        continue;
+                                    }
                                     default: throw new ExecutionException("unknown opcode : " + opcode);
                                 }
+                            case OpcodeType.Nop:
+                                continue;
                         }
                     }
+#if !EXECUTE_COROUTINE
                     --VariableValueIndex;
+#endif
                     //正常执行命令到最后,判断堆栈是否清空 return 或 exception 不判断
-                    Logger.debug(stackIndex != -1, "堆栈数据未清空，有泄露情况 : " + stackIndex);
-                //主动throw的情况
+#if SCORPIO_DEBUG
+                    if (stackIndex != -1) {
+                        throw new ExecutionException($"堆栈数据未清空,有泄露情况,需要检查指令 : {stackIndex}");
+                    }
+#endif
+#if !EXECUTE_COROUTINE
+                    //主动throw的情况
                 } catch (ScriptException e) {
                     if (tryIndex > -1) {
                         stackObjects[stackIndex = 0] = e.value;
@@ -1500,6 +1761,11 @@ namespace Scorpio.Runtime {
                 throw;
             }
             return ScriptValue.Null;
+#else
+            } finally {
+                --VariableValueIndex;
+            }
+#endif
         }
     }
 }
